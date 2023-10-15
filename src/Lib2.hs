@@ -14,14 +14,41 @@ import Control.Applicative
 type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 
+data RelationalOperator 
+    = EQ 
+    | NE 
+    | LT 
+    | GT 
+    | LE 
+    | GE
+    deriving (Show, Eq)
+
+type ColumnName = String
+
+data WhereCriteria 
+    = WhereCriteria ColumnName RelationalOperator Value
+    deriving (Show, Eq)
+
+data AggregateFunction 
+    = Min 
+    | Sum
+    deriving (Show, Eq)
+
+data Aggregate 
+    = Aggregate (Maybe AggregateFunction) Column
+    deriving (Show, Eq)
+
+type TableName = String
+
+
 -- Keep the type, modify constructors
 data ParsedStatement = ParsedStatement
-{
-  aggregateList :: [(Maybe String, String)],
-  tableName :: String,
-  hasWhereClause :: Bool,
-  whereConditions :: [(String, String, String)]
-} deriving (Show)
+    { isShowTables :: Bool
+    , aggregates   :: [Aggregate]
+    , tables       :: [TableName]
+    , whereClause  :: [WhereCriteria]
+    } deriving (Show, Eq)
+
 
 newtype Parser a = Parser {
     runParser :: String -> Either ErrorMessage (String, a)
