@@ -16,6 +16,12 @@ type Database = [(TableName, DataFrame)]
 
 -- Keep the type, modify constructors
 data ParsedStatement = ParsedStatement
+{
+  aggregateList :: [(Maybe String, String)],
+  tableName :: String,
+  hasWhereClause :: Bool,
+  whereConditions :: [(String, String, String)]
+} deriving (Show)
 
 newtype Parser a = Parser {
     runParser :: String -> Either ErrorMessage (String, a)
