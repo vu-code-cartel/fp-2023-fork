@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Lib2
   ( parseStatement,
@@ -7,31 +8,27 @@ module Lib2
   )
 where
 
-import DataFrame (DataFrame)
-import InMemoryTables (TableName)
+import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..)) 
+import InMemoryTables (TableName, database)
 import Control.Applicative
 
 type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 
--- Keep the type, modify constructors
-data ParsedStatement = ParsedStatement
+data ParsedStatement = ShowTablesStatement
 
 newtype Parser a = Parser {
     runParser :: String -> Either ErrorMessage (String, a)
 }
 
 instance Functor Parser where
-    fmap :: (a -> b) -> Parser a -> Parser b
     fmap f p = Parser $ \inp ->
         case runParser p inp of
             Left err -> Left err
             Right (l, a) -> Right (l, f a)
 
 instance Applicative Parser where
-    pure :: a -> Parser a
     pure a = Parser $ \inp -> Right (inp, a)
-    (<*>) :: Parser (a -> b) -> Parser a -> Parser b
     pf <*> pa = Parser $ \inp1 ->
         case runParser pf inp1 of
             Left err1 -> Left err1
@@ -40,9 +37,7 @@ instance Applicative Parser where
                 Right (inp3, a) -> Right (inp3, f a)
 
 instance Alternative Parser where
-    empty :: Parser a
     empty = Parser $ \_ -> Left "Error"
-    (<|>) :: Parser a -> Parser a -> Parser a
     p1 <|> p2 = Parser $ \inp ->
         case runParser p1 inp of
             Right a1 -> Right a1
@@ -51,7 +46,6 @@ instance Alternative Parser where
                 Left err -> Left err
 
 instance Monad Parser where
-    (>>=) :: Parser a -> (a -> Parser b) -> Parser b
     pa >>= pbGen = Parser $ \inp1 ->
         case runParser pa inp1 of
             Left err1 -> Left err1
@@ -59,12 +53,60 @@ instance Monad Parser where
                 Left err2 -> Left err2
                 Right (inp3, b) -> Right (inp3, b)
 
--- Parses user input into an entity representing a parsed
--- statement
-parseStatement :: String -> Either ErrorMessage ParsedStatement
-parseStatement _ = Left "Not implemented: parseStatement"
+myCustomIsPrefixOf :: Eq a => [a] -> [a] -> Bool
+myCustomIsPrefixOf [] _ = True
+myCustomIsPrefixOf _ [] = False
+myCustomIsPrefixOf (x:xs) (y:ys) = x == y && myCustomIsPrefixOf xs ys
 
--- Executes a parsed statemet. Produces a DataFrame. Uses
--- InMemoryTables.databases a source of data.
+string :: String -> Parser String
+string s = Parser $ \inp ->
+  if myCustomIsPrefixOf s inp
+    then Right (drop (length s) inp, s)
+    else Left "Parse error"
+
+parseShow :: Parser ()
+parseShow = do
+  _ <- string "show"
+  pure ()
+
+parseWhiteSpace :: Parser ()
+parseWhiteSpace = do
+  _ <- many (string " ")
+  pure ()
+
+parseTables :: Parser ()
+parseTables = do
+  _ <- string "tables"
+  pure ()
+
+parseShowTables :: Parser ParsedStatement
+parseShowTables = do
+  parseShow
+  parseWhiteSpace
+  parseTables
+  pure ShowTablesStatement
+
+
+toLowerString :: String -> String
+toLowerString = map toLowerChar
+  where
+    toLowerChar c
+      | c >= 'A' && c <= 'Z' = toEnum (fromEnum c + 32)
+      | otherwise = c
+
+-- use here <|> to check parsers: for example in case of: case runParser (parseSelect <|> parseShowTables) (toLowerString inp) of ...
+parseStatement :: String -> Either ErrorMessage ParsedStatement
+parseStatement inp =
+  case runParser parseShowTables (toLowerString inp) of
+    Left err -> Left err
+    Right ("", statement) -> Right statement
+    Right (_, _) -> Left "Parse error"
+
 executeStatement :: ParsedStatement -> Either ErrorMessage DataFrame
-executeStatement _ = Left "Not implemented: executeStatement"
+executeStatement ShowTablesStatement = Right $ convertToDataFrame (tableNames database)
+
+tableNames :: Database -> [TableName]
+tableNames db = map fst db
+
+convertToDataFrame :: [TableName] -> DataFrame
+convertToDataFrame tableNames = DataFrame [Column "Table Name" StringType] (map (\name -> [StringValue name]) tableNames)
