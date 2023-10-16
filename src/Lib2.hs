@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE DataKinds #-}
 
 module Lib2
