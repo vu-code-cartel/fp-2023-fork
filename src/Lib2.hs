@@ -56,10 +56,13 @@ type SelectQuery = [SelectData]
 type WhereClause = [(WhereCriterion, Maybe LogicalOperator)]
 
 -- Keep the type, modify constructors
-data ParsedStatement
-    = SelectStatement TableName SelectQuery WhereClause
-    | ShowTableStatement TableName
-    | ShowTablesStatement
+data ParsedStatement = SelectStatement {
+    table :: TableName,
+    query :: SelectQuery,
+    whereClause :: WhereClause
+} | ShowTableStatement {
+    table :: TableName
+} | ShowTablesStatement { }
     deriving (Show, Eq)
 
 newtype Parser a = Parser {
