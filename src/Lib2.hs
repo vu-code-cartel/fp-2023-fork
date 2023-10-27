@@ -467,24 +467,24 @@ executeSelectQuery selectQuery columns rows maybeWhereClause =
 processSelectQuery :: SelectQuery -> [Column] -> [Row] -> Either ErrorMessage ([Column], [Row])
 processSelectQuery [] _ _ = Left "No columns or aggregates selected in the SELECT statement."
 processSelectQuery selectQuery columns rows = do
-    (selectedColumns, selectedRows) <- processSelectQuery' selectQuery columns rows [] []
+    (selectedColumns, selectedRows) <- processSelectQuery' selectQuery columns rows [] [] rows
     if null selectedColumns
         then Left "No valid columns or aggregates selected in the SELECT statement."
         else Right (selectedColumns, selectedRows)
 
-processSelectQuery' :: SelectQuery -> [Column] -> [Row] -> [Column] -> [Int] -> Either ErrorMessage ([Column], [Row])
-processSelectQuery' [] _ rows selectedColumns selectedIndices = Right (reverse selectedColumns, filterRows (reverse selectedIndices) rows)
-processSelectQuery' (selectData:rest) columns rows selectedColumns selectedIndices =
+processSelectQuery' :: SelectQuery -> [Column] -> [Row] -> [Column] -> [Int] -> [Row] -> Either ErrorMessage ([Column], [Row])
+processSelectQuery' [] _ rows selectedColumns selectedIndices _ = Right (reverse selectedColumns, filterRows (reverse selectedIndices) rows)
+processSelectQuery' (selectData:rest) columns rows selectedColumns selectedIndices ogRows =
     case selectData of
         SelectColumn columnName -> do
             columnIndex <- findColumnIndex columnName columns
-            processSelectQuery' rest columns rows (columns !! columnIndex : selectedColumns) (columnIndex : selectedIndices)
+            processSelectQuery' rest columns rows (columns !! columnIndex : selectedColumns) (columnIndex : selectedIndices) ogRows
         SelectAggregate (Aggregate aggFunc columnName) -> do
             columnIndex <- findColumnIndex columnName columns
             columnType <- findColumnType columnName columns
             let newColumn = createAggregateColumn aggFunc columnName columnType
-            let newRows = createAggregateRows columnName columns aggFunc columnIndex rows
-            processSelectQuery' rest columns newRows (newColumn : selectedColumns) (columnIndex : selectedIndices)
+            let newRows = createAggregateRows columnName columns aggFunc columnIndex rows ogRows
+            processSelectQuery' rest columns newRows (newColumn : selectedColumns) (columnIndex : selectedIndices) ogRows
 
 createAggregateColumn :: AggregateFunction -> ColumnName -> ColumnType -> Column
 createAggregateColumn aggFunc columnName columnType =
@@ -492,13 +492,13 @@ createAggregateColumn aggFunc columnName columnType =
         Min -> Column ("MIN(" ++ columnName ++ ")") columnType
         Sum -> Column ("SUM(" ++ columnName ++ ")") IntegerType
 
-createAggregateRows :: ColumnName -> [Column] -> AggregateFunction -> Int -> [Row] -> [Row]
-createAggregateRows columnName columns aggFunc index rows =
+createAggregateRows :: ColumnName -> [Column] -> AggregateFunction -> Int -> [Row] -> [Row] -> [Row]
+createAggregateRows columnName columns aggFunc index rows ogRows =
     case aggFunc of
-        Sum -> let sumValue = sumColumnValues index rows columnName columns in
+        Sum -> let sumValue = sumColumnValues index ogRows columnName columns in
             case sumValue of
             Right value -> take 1 $ map (updateCell index value) rows
-        Min -> let minValue = minColumnValue index rows in
+        Min -> let minValue = minColumnValue index ogRows in
             case minValue of
             Right value -> take 1 $ map (updateCell index value) rows
 
