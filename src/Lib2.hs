@@ -483,7 +483,7 @@ processSelectQuery' (selectData:rest) columns rows selectedColumns selectedIndic
             columnIndex <- findColumnIndex columnName columns
             columnType <- findColumnType columnName columns
             let newColumn = createAggregateColumn aggFunc columnName columnType
-            let newRows = createAggregateRows columnName columns aggFunc columnIndex ogRows
+            let newRows = createAggregateRows columnName columns aggFunc columnIndex rows ogRows
             processSelectQuery' rest columns newRows (newColumn : selectedColumns) (columnIndex : selectedIndices) ogRows
 
 createAggregateColumn :: AggregateFunction -> ColumnName -> ColumnType -> Column
@@ -492,13 +492,13 @@ createAggregateColumn aggFunc columnName columnType =
         Min -> Column ("MIN(" ++ columnName ++ ")") columnType
         Sum -> Column ("SUM(" ++ columnName ++ ")") IntegerType
 
-createAggregateRows :: ColumnName -> [Column] -> AggregateFunction -> Int -> [Row] -> [Row]
-createAggregateRows columnName columns aggFunc index rows =
+createAggregateRows :: ColumnName -> [Column] -> AggregateFunction -> Int -> [Row] -> [Row] -> [Row]
+createAggregateRows columnName columns aggFunc index rows ogRows =
     case aggFunc of
-        Sum -> let sumValue = sumColumnValues index rows columnName columns in
+        Sum -> let sumValue = sumColumnValues index ogRows columnName columns in
             case sumValue of
             Right value -> take 1 $ map (updateCell index value) rows
-        Min -> let minValue = minColumnValue index rows in
+        Min -> let minValue = minColumnValue index ogRows in
             case minValue of
             Right value -> take 1 $ map (updateCell index value) rows
 
