@@ -154,6 +154,7 @@ parseStatement inp = case runParser parser (dropWhile isSpace inp) of
         parser = parseShowTableStatement
                 <|> parseShowTablesStatement
                 <|> parseSelectStatement
+                <|> parseSelectAllStatement
 
 -- statement by type parsing
 
@@ -185,6 +186,16 @@ parseSelectStatement = do
     case validateSelectData selectData of
         Just err -> Parser $ \_ -> Left err
         Nothing -> pure $ SelectStatement tableName selectData whereClause
+
+parseSelectAllStatement :: Parser ParsedStatement
+parseSelectAllStatement = do
+    _ <- parseKeyword "select"
+    _ <- parseWhitespace
+    _ <- parseKeyword "*"
+    _ <- parseWhitespace
+    _ <- parseKeyword "from"
+    _ <- parseWhitespace
+    ShowTableStatement <$> parseWord
 
 -- util parsing functions
 
