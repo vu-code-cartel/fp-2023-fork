@@ -71,8 +71,6 @@ data ParsedStatement = SelectStatement {
     table :: TableName,
     query :: SelectQuery,
     whereClause :: Maybe WhereClause
-} | SelectAllStatement {
-    table :: TableName
 } | ShowTableStatement {
     table :: TableName
 } | ShowTablesStatement { }
@@ -187,7 +185,7 @@ parseSelectAllStatement = do
     _ <- parseWhitespace
     _ <- parseKeyword "from"
     _ <- parseWhitespace
-    SelectAllStatement <$> parseWord
+    ShowTableStatement <$> parseWord
 
 
 -- util parsing functions
