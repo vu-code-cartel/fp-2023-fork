@@ -124,7 +124,7 @@ parseStatement :: String -> Either ErrorMessage ParsedStatement
 parseStatement inp = case runParser parser (dropWhile isSpace inp) of
     Left err1 -> Left err1
     Right (rest, statement) -> case statement of
-        SelectAllStatement _ -> case runParser parseEndOfStatement rest of
+        ShowTableStatement _ -> case runParser parseEndOfStatement rest of
             Left err2 -> Left err2
             Right _ -> Right statement
         SelectStatement _ _ _ -> case runParser parseEndOfStatement rest of
