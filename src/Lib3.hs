@@ -62,7 +62,6 @@ serializeTable :: (TableName, DataFrame) -> Either ErrorMessage FileContent
 serializeTable (tableName, dataFrame) = do
     _ <- validateDataFrame dataFrame
     return $ serializeTable' (tableName, dataFrame)
-
     where
         serializeTable' :: (TableName, DataFrame) -> FileContent
         serializeTable' (tableName', DataFrame cols rows) = 
@@ -117,7 +116,6 @@ parseTable content = do
     table <- parsedTable' serializedTable
     _ <- validateDataFrame $ snd table
     return table
-
     where
         fromYaml :: FileContent -> Either ErrorMessage SerializedTable
         fromYaml yaml =
