@@ -1,0 +1,11 @@
+tableName: employees
+columns:
+- name: id
+  dataType: integer
+- name: name
+  dataType: string
+- name: surname
+  dataType: string
+rows:
+- [1, Ed, Dl]
+- [2, Vi, Po]
