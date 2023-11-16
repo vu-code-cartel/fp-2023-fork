@@ -3,6 +3,8 @@
 
 module Lib3
   ( executeSql,
+    serializeTable,
+    parseTable,
     Execution,
     ExecutionAlgebra(..)
   )
