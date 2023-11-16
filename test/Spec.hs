@@ -143,6 +143,14 @@ main = hspec $ do
                       \  dataType: number                 \n\
                       \rows: []"
                       `shouldSatisfy` isLeft
+    it "handles non-integer numbers" $ do
+      Lib3.parseTable "tableName: Decimals                \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: integer                \n\
+                      \rows:                              \n\
+                      \- [1.1]"
+                      `shouldSatisfy` isLeft
     it "handles data type mismatch" $ do
       Lib3.parseTable "tableName: Mismatch                \n\
                       \columns:                           \n\
