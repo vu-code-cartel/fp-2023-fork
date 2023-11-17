@@ -7,5 +7,5 @@ columns:
 - name: surname
   dataType: string
 rows:
-- [1, Ed, Dl]
-- [2, Vi, Po]
+- [1, Vi, Po]
+- [2, Ed, Dl]
