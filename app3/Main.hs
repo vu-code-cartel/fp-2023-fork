@@ -64,9 +64,12 @@ runExecuteIO (Free step) = do
     runExecuteIO next
     where
         runStep :: Lib3.ExecutionAlgebra a -> IO a
-        runStep (Lib3.GetTime next) = getCurrentTime >>= return . next
-        runStep (Lib3.LoadFile tableName next) = readFile (getTableFilePath tableName) >>= return . next
-        runStep (Lib3.SaveFile tableName fileContent next) = writeFile (getTableFilePath tableName) fileContent >>= return . next
+        runStep (Lib3.GetTime next) = 
+          getCurrentTime >>= return . next
+        runStep (Lib3.LoadFile tableName next) = 
+          readFile (getTableFilePath tableName) >>= return . next
+        runStep (Lib3.SaveFile tableName fileContent next) = 
+          writeFile (getTableFilePath tableName) fileContent >>= return . next
 
         getTableFilePath :: String -> String
         getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"
