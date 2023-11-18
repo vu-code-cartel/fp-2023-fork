@@ -21,7 +21,14 @@ module Lib2
     WhereClause (..),
     WhereCriterion (..),
     LogicalOperator (..),
-    Value(..)
+    Value(..),
+    parseChar,
+    Parser(..),
+    parseKeyword,
+    parseWhitespace,
+    parseWord,
+    parseValue,
+    runParser
   )
 where
 
