@@ -7,7 +7,6 @@ import Data.Functor((<&>))
 import Data.Time ( UTCTime, getCurrentTime )
 import Data.List qualified as L
 import Lib1 qualified
-import Lib2 qualified
 import Lib3 qualified
 import System.Console.Repline
   ( CompleterStyle (Word),
@@ -70,6 +69,10 @@ runExecuteIO (Free step) = do
           readFile (getTableFilePath tableName) >>= return . next
         runStep (Lib3.SaveFile tableName fileContent next) = 
           writeFile (getTableFilePath tableName) fileContent >>= return . next
+        runStep (Lib3.ExecutePure sql next) = do
+          currentTime <- getCurrentTime
+          let result = Lib3.parseStatement sql >>= (\parsedStmt -> Lib3.executeStatement currentTime parsedStmt)
+          return $ next result
 
         getTableFilePath :: String -> String
         getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"

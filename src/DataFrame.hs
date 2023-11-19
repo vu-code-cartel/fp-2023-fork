@@ -4,6 +4,7 @@ data ColumnType
   = IntegerType
   | StringType
   | BoolType
+  | DateTimeType 
   deriving (Show, Eq)
 
 data Column = Column String ColumnType
@@ -14,6 +15,7 @@ data Value
   | StringValue String
   | BoolValue Bool
   | NullValue
+  | DateTimeValue String  
   deriving (Show, Eq)
 
 type Row = [Value]

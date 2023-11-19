@@ -22,15 +22,22 @@ module Lib2
     WhereCriterion (..),
     LogicalOperator (..),
     Value(..),
-    parseChar,
     Parser(..),
-    parseKeyword,
-    parseWhitespace,
+    ColumnName(..),
+    Database(..),
+    parseShowTablesStatement,
+    parseShowTableStatement,
+    parseSelectAllStatement,
+    parseEndOfStatement,
+    parseChar,
     parseWord,
     parseValue,
-    runParser,
-    parseEndOfStatement
-  )
+    parseKeyword,
+    parseWhitespace,
+    sepBy,
+    parseWhereClause,
+    parseRelationalOperator,
+    )
 where
 
 import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row)
@@ -159,9 +166,9 @@ parseStatement inp = case runParser parser (dropWhile isSpace inp) of
             Right _ -> Right statement
     where
         parser :: Parser ParsedStatement
-        parser = parseShowTableStatement
+        parser = parseSelectStatement
+                <|> parseShowTableStatement
                 <|> parseShowTablesStatement
-                <|> parseSelectStatement
                 <|> parseSelectAllStatement
 
 -- statement by type parsing
@@ -183,11 +190,11 @@ parseShowTablesStatement = do
 
 parseSelectStatement :: Parser ParsedStatement
 parseSelectStatement = do
-    _ <- parseKeyword "SELECT"
+    _ <- parseKeyword "select"
     _ <- parseWhitespace
     selectData <- parseSelectData `sepBy` (parseChar ',' *> optional parseWhitespace)
     _ <- parseWhitespace
-    _ <- parseKeyword "FROM"
+    _ <- parseKeyword "from"
     _ <- parseWhitespace
     tableName <- parseWord
     whereClause <- optional parseWhereClause
@@ -343,9 +350,8 @@ parseAggregate = do
     _ <- optional parseWhitespace
     _ <- parseChar ')'
     pure $ Aggregate func columnName
-
+    
 -- validation
-
 validateSelectData :: [SelectData] -> Maybe ErrorMessage
 validateSelectData selectData
     | all isSelectColumn selectData = Nothing
