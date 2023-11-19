@@ -3,9 +3,49 @@ import Data.Maybe ()
 import InMemoryTables qualified as D
 import Lib1
 import Lib2
+import Lib3
 import Test.Hspec
 import DataFrame
+import Control.Monad.Free (Free (..))
+import Data.Time ( UTCTime, getCurrentTime )
+import Data.IORef
 
+type DBMock = [(String, IORef String)]
+
+setupDB :: IO DBMock
+setupDB = do
+  employeesRef <- newIORef "tableName: employees\n\
+                           \columns:\n\
+                           \- name: id\n\
+                           \  dataType: integer\n\
+                           \- name: name\n\
+                           \  dataType: string\n\
+                           \- name: surname\n\
+                           \  dataType: string\n\
+                           \rows:\n\
+                           \- [1, Vi, Po]\n\
+                           \- [2, Ed, Dl]\n"
+  return [("employees", employeesRef)]
+
+runExecuteIO :: DBMock -> Lib3.Execution r -> IO (DBMock, r)
+runExecuteIO dbMock (Pure r) = return (dbMock, r)
+runExecuteIO dbMock (Free step) = do
+  next <- runStep step
+  runExecuteIO dbMock next
+  where
+    runStep :: Lib3.ExecutionAlgebra a -> IO a
+    runStep (Lib3.GetTime next) =
+      getCurrentTime >>= return . next
+    runStep (Lib3.LoadFile tableName next) = do
+      readIORef (getValueByKey dbMock tableName) >>= return . next
+    runStep (Lib3.SaveFile tableName fileContent next) = do
+      writeIORef (getValueByKey dbMock tableName) fileContent >>= return . next
+
+getValueByKey :: Eq a => [(a, b)] -> a -> b
+getValueByKey [] _ = error "Key not found"
+getValueByKey ((k, v):xs) key
+  | key == k = v
+  | otherwise = getValueByKey xs key
 
 main :: IO ()
 main = hspec $ do
@@ -85,8 +125,8 @@ main = hspec $ do
     it "handles SELECT statement with multiple WHERE criterion that compare columns" $ do
       Lib2.parseStatement "SELECT a, b, c, d FROM table WHERE a=b AND b!=c AND c>d AND d<e AND a>=b AND b<=c;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a",SelectColumn "b",SelectColumn "c",SelectColumn "d"], whereClause = Just [(WhereCriterion (ColumnExpression "a") RelEQ (ColumnExpression "b"),Just And),(WhereCriterion (ColumnExpression "b") RelNE (ColumnExpression "c"),Just And),(WhereCriterion (ColumnExpression "c") RelGT (ColumnExpression "d"),Just And),(WhereCriterion (ColumnExpression "d") RelLT (ColumnExpression "e"),Just And),(WhereCriterion (ColumnExpression "a") RelGE (ColumnExpression "b"),Just And),(WhereCriterion (ColumnExpression "b") RelLE (ColumnExpression "c"),Nothing)]})
     it "handles SELECT statement with multiple WHERE criterion that compare strings" $ do
-        Lib2.parseStatement "SELECT a FROM table WHERE 'aa'='aa' AND 'a'!='b' 'b'<'c';" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a"], whereClause = Just [(WhereCriterion (ValueExpression (StringValue 
-        "aa")) RelEQ (ValueExpression (StringValue "aa")),Just And),(WhereCriterion (ValueExpression (StringValue "a")) RelNE (ValueExpression 
+        Lib2.parseStatement "SELECT a FROM table WHERE 'aa'='aa' AND 'a'!='b' 'b'<'c';" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a"], whereClause = Just [(WhereCriterion (ValueExpression (StringValue
+        "aa")) RelEQ (ValueExpression (StringValue "aa")),Just And),(WhereCriterion (ValueExpression (StringValue "a")) RelNE (ValueExpression
         (StringValue "b")),Nothing),(WhereCriterion (ValueExpression (StringValue "b")) RelLT (ValueExpression (StringValue "c")),Nothing)]})
     it "handles SELECT statement with multiple WHERE criterion that compare strings and columns" $ do
       Lib2.parseStatement "SELECT a FROM table WHERE a='aa' AND aaa!='b' AND 'b'<aaa;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a"], whereClause = Just [(WhereCriterion (ColumnExpression "a") RelEQ (ValueExpression (StringValue "aa")),Just And),(WhereCriterion (ColumnExpression "aaa") RelNE (ValueExpression (StringValue "b")),Just And),(WhereCriterion (ValueExpression (StringValue "b")) RelLT (ColumnExpression "aaa"),Nothing)]})
@@ -101,3 +141,140 @@ main = hspec $ do
       Lib2.executeStatement SelectStatement {table = "employees", query = [SelectAggregate (Aggregate Min "id")], whereClause = Nothing} `shouldSatisfy` isRight
     it "executes select statement with a where clause" $ do
       Lib2.executeStatement SelectStatement {table = "employees", query = [SelectColumn "id"], whereClause = Just [(WhereCriterion (ColumnExpression "name") RelEQ (ValueExpression (StringValue "Ed")),Nothing)]} `shouldSatisfy` isRight
+  describe "Lib3.parseTable" $ do
+    it "parses valid table" $ do
+      Lib3.parseTable "tableName: Organization_Employees  \n\
+                      \columns:                           \n\
+                      \- name: id                         \n\
+                      \  dataType: integer                \n\
+                      \- name: name                       \n\
+                      \  dataType: string                 \n\
+                      \- name: surname                    \n\
+                      \  dataType: StrInG                 \n\
+                      \- name: isFired                    \n\
+                      \  dataType: bool                   \n\
+                      \rows:                              \n\
+                      \- [1, Vi, Po, false]               \n\
+                      \- [2, Ed, Dl, NULL]                \n\
+                      \- [Null, <UNKNOWN>, null, TRUE]"
+                      `shouldBe` Right ("Organization_Employees", DataFrame
+                        [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType, Column "isFired" BoolType] [
+                        [IntegerValue 1, StringValue "Vi", StringValue "Po", BoolValue False],
+                        [IntegerValue 2, StringValue "Ed", StringValue "Dl", NullValue],
+                        [NullValue, StringValue "<UNKNOWN>", NullValue, BoolValue True]])
+    it "parses table with no rows" $ do
+      Lib3.parseTable "tableName: NoRows                  \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: integer                \n\
+                      \- name: Name                       \n\
+                      \  dataType: string                 \n\
+                      \rows: []"
+                      `shouldBe` Right ("NoRows", DataFrame [Column "Id" IntegerType, Column "Name" StringType] [])
+    it "parses table with no columns" $ do
+      Lib3.parseTable "tableName: NoCols_123              \n\
+                      \columns: []                        \n\
+                      \rows: []"
+                      `shouldBe` Right ("NoCols_123", DataFrame [] [])
+    it "handles unknown data type" $ do
+      Lib3.parseTable "tableName: NoRows                  \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: number                 \n\
+                      \rows: []"
+                      `shouldSatisfy` isLeft
+    it "handles non-integer numbers" $ do
+      Lib3.parseTable "tableName: Decimals                \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: integer                \n\
+                      \rows:                              \n\
+                      \- [1.1]"
+                      `shouldSatisfy` isLeft
+    it "handles data type mismatch" $ do
+      Lib3.parseTable "tableName: Mismatch                \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: integer                \n\
+                      \rows:                              \n\
+                      \- [test]"
+                      `shouldSatisfy` isLeft
+    it "handles missing value in row" $ do
+      Lib3.parseTable "tableName: Missing_Value           \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: integer                \n\
+                      \- name: Name                       \n\
+                      \  dataType: string                 \n\
+                      \rows:                              \n\
+                      \- [1, John]                        \n\
+                      \- [2]                              \n\
+                      \- [3, Eric]"
+                      `shouldSatisfy` isLeft
+    it "handles rows with too many values" $ do
+      Lib3.parseTable "tableName: Too_Many                \n\
+                      \columns:                           \n\
+                      \- name: Id                         \n\
+                      \  dataType: integer                \n\
+                      \- name: Name                       \n\
+                      \  dataType: string                 \n\
+                      \rows:                              \n\
+                      \- [1, John]                        \n\
+                      \- [2, Just]                        \n\
+                      \- [3, Eric, Doe]"
+                      `shouldSatisfy` isLeft
+  describe "Lib3.serializeTable" $ do
+    it "serializes valid table" $ do
+      Lib3.serializeTable ("Organization_Employees",
+        DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType, Column "isFired" BoolType] [
+                  [IntegerValue 1, StringValue "Vi", StringValue "Po", BoolValue False],
+                  [IntegerValue 2, StringValue "Ed", StringValue "Dl", NullValue],
+                  [NullValue, StringValue "<UNKNOWN>", NullValue, BoolValue True]])
+        `shouldBe` Right "tableName: Organization_Employees\n\
+                         \columns:\n\
+                         \- name: id\n\
+                         \  dataType: integer\n\
+                         \- name: name\n\
+                         \  dataType: string\n\
+                         \- name: surname\n\
+                         \  dataType: string\n\
+                         \- name: isFired\n\
+                         \  dataType: bool\n\
+                         \rows:\n\
+                         \- [1, Vi, Po, False]\n\
+                         \- [2, Ed, Dl, null]\n\
+                         \- [null, <UNKNOWN>, null, True]\n"
+    it "serializes table with no rows" $ do
+      Lib3.serializeTable ("NoRows", DataFrame [Column "Id" IntegerType, Column "Name" StringType] [])
+      `shouldBe` Right "tableName: NoRows\n\
+                       \columns:\n\
+                       \- name: Id\n\
+                       \  dataType: integer\n\
+                       \- name: Name\n\
+                       \  dataType: string\n\
+                       \rows: []\n"
+    it "serializes table with no columns" $ do
+      Lib3.serializeTable ("NoCols_123", DataFrame [] [])
+      `shouldBe` Right "tableName: NoCols_123\n\
+                       \columns: []\n\
+                       \rows: []\n"
+    it "handles data type mismatch" $ do
+      Lib3.serializeTable ("Mismatch", DataFrame [Column "Id" IntegerType] [[StringValue "test"]]) `shouldSatisfy` isLeft
+    it "handles missing value in row" $ do
+      Lib3.serializeTable ("Missing_Value", DataFrame
+        [Column "Id" IntegerType, Column "Name" StringType] [
+        [IntegerValue 1, StringValue "John"],
+        [IntegerValue 2],
+        [IntegerValue 3, StringValue "Eric"]])
+        `shouldSatisfy` isLeft
+    it "handles rows with too many values" $ do
+      Lib3.serializeTable ("Too_Many", DataFrame
+        [Column "Id" IntegerType, Column "Name" StringType] [
+        [IntegerValue 1, StringValue "John"],
+        [IntegerValue 2, StringValue "Just"],
+        [IntegerValue 3, StringValue "Eric", StringValue "Doe"]])
+        `shouldSatisfy` isLeft
+    -- it "PLACEHOLDER TEST JUST FOR USAGE SHOWCASE" $ do
+    --   db <- setupDB
+    --   res <- runExecuteIO db $ Lib3.executeSql "my_sql"
+    --   updatedDb <- readIORef $ getValueByKey (fst res) "employees"

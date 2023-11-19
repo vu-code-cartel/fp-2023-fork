@@ -1,8 +1,10 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 
+
 module Lib3
-  ( executeSql,
+  ( 
+    executeSql,
     Execution,
     ExecutionAlgebra(..),
     parseStatement,
@@ -23,8 +25,11 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Yaml as Y
 import GHC.Generics (Generic)
-import Data.Char (toLower)
+import Data.Char (toLower, isDigit, isSpace)
 import Lib1 (validateDataFrame)
+import Lib2 (parseEndOfStatement,Parser(..),runParser, parseChar, parseKeyword, parseWhitespace, parseWord)
+import Control.Applicative ( many, some, Alternative(empty, (<|>)), optional )
+
 import Data.Char (toLower, isSpace, isAlphaNum)
 import Lib2(
     Parser(..),
@@ -40,16 +45,40 @@ import InMemoryTables (database)
 
 type TableName = String
 type FileContent = String
+type ErrorMessage = String
+
+data Condition = Condition String RelationalOperator Value
+  deriving (Show, Eq)
+
+data Condition = Condition String RelationalOperator Value
+  deriving (Show, Eq)
 
 data ExecutionAlgebra next
   = LoadFile TableName (FileContent -> next)
   | SaveFile TableName FileContent (() -> next)
   | GetTime (UTCTime -> next)
   | ExecutePure String (Either ErrorMessage DataFrame -> next)
+  | InsertData TableName [[Y.Value]] (() -> next)
   -- feel free to add more constructors here
   deriving Functor
 
+data ParsedStatementLib3
+  = InsertStatement {
+      tableNameInsert :: TableName,
+      columnsInsert :: Maybe [String],
+      valuesInsert :: [Value]
+    }
+  | UpdateStatement {
+      tableNameUpdate :: TableName,
+      updates :: [(String, Value)],
+      whereConditions :: Maybe [Condition]
+    }
+  deriving (Show, Eq)
+
 type Execution = Free ExecutionAlgebra
+
+data RelationalOperator = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
+  deriving (Show, Eq)
 
 data SerializedColumn = SerializedColumn {
     name :: String,
@@ -61,6 +90,7 @@ data SerializedTable = SerializedTable {
     columns :: [SerializedColumn],
     rows :: [[Y.Value]]
 } deriving (Show, Eq, Generic)
+
 
 instance Y.FromJSON SerializedColumn
 instance Y.FromJSON SerializedTable
@@ -132,8 +162,190 @@ saveFile tableName fileContent = liftF $ SaveFile tableName fileContent id
 getTime :: Execution UTCTime
 getTime = liftF $ GetTime id
 
+
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = liftF $ ExecutePure sql id
+
+-- call this to get get tableName,[columnNames] [values] from "insert into tablename values('value1', value2,...)" statement, values will be converted by their Y.Values types
+-- call this to get all data from update query
+parseStatementLib3 :: String -> Either ErrorMessage (TableName, Maybe [String], [Value], Maybe [Condition])
+parseStatementLib3 inp = case runParser parser (dropWhile isSpace inp) of
+    Left err1 -> Left err1
+    Right (rest, statement) -> case statement of
+        InsertStatement { tableNameInsert = tableName, columnsInsert = columns, valuesInsert = values} -> 
+          Right (tableName, columns, values, Nothing)
+        UpdateStatement { tableNameUpdate = tableName, updates = updatesList, whereConditions = conditions} ->
+          let (columns, values) = unzip updatesList in
+          Right (tableName, Just columns, values, conditions)
+  where
+    parser :: Parser ParsedStatementLib3
+    parser = parseInsertStatement <* parseEndOfStatement <|> parseUpdateStatement <* parseEndOfStatement
+
+parseInsertStatement :: Parser ParsedStatementLib3
+parseInsertStatement = do
+  _ <- parseKeyword "insert"
+  _ <- parseWhitespace
+  _ <- parseKeyword "into"
+  _ <- parseWhitespace
+  tableName <- parseWord
+  parseOptionalWhitespace
+  columns <- optional parseColumnNames
+  _ <- parseKeyword "values"
+  parseOptionalWhitespace
+  values <- parseValues
+  case columns of
+    Nothing -> return $ InsertStatement tableName columns values
+    Just cols ->
+      if length cols == length values
+        then return $ InsertStatement tableName columns values
+        else Parser $ \_ -> Left "Column count does not match the number of values provided"
+
+parseColumnNames :: Parser [String]
+parseColumnNames = do
+  _ <- parseChar '('
+  names <- parseWord `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  _ <- parseChar ')'
+  _ <- parseWhitespace
+  return names
+ 
+parseValues :: Parser [Value]
+parseValues = do
+  _ <- parseChar '('
+  values <- parseValue `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  _ <- parseChar ')'
+  return values
+
+parseValue :: Parser Value
+parseValue = do
+  parseOptionalWhitespace
+  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
+  parseOptionalWhitespace
+  return val
+
+parseOptionalWhitespace :: Parser ()
+parseOptionalWhitespace = many (parseWhitespace *> pure ()) *> pure ()
+
+parseNumericValue :: Parser Value
+parseNumericValue = (IntegerValue <$> parseInt)
+
+parseInt :: Parser Integer
+parseInt = do
+  digits <- some (parseSatisfy isDigit)
+  return (read digits)
+
+parseNullValue :: Parser Value
+parseNullValue = parseKeyword "null" >> return NullValue
+
+parseBoolValue :: Parser Value
+parseBoolValue = (parseKeyword "true" >> return (BoolValue True)) <|>
+                 (parseKeyword "false" >> return (BoolValue False))
+
+parseStringValue :: Parser Value
+parseStringValue = do
+  strValue <- parseStringWithQuotes 
+  return (StringValue strValue)
+
+parseStringWithQuotes :: Parser String
+parseStringWithQuotes = do
+  _ <- parseChar '\''
+  str <- some (parseSatisfy (/= '\''))
+  _ <- parseChar '\''
+  return str
+
+sepBy :: Parser a -> Parser b -> Parser [a]
+sepBy p sep = do
+  x <- p
+  xs <- many (sep *> p)
+  return (x:xs)
+
+parseSatisfy :: (Char -> Bool) -> Parser Char
+parseSatisfy predicate = Parser $ \inp ->
+    case inp of
+        [] -> Left "Empty input"
+        (x:xs) -> if predicate x then Right (xs, x) else Left ("Unexpected character: " ++ [x])
+
+parseUpdateStatement :: Parser ParsedStatementLib3
+parseUpdateStatement = do
+  _ <- parseKeyword "update"
+  _ <- parseWhitespace
+  tableName <- parseWord
+  _ <- parseWhitespace
+  _ <- parseKeyword "set"
+  _ <- parseWhitespace
+  updatesList <- parseUpdates
+  hasWhere <- optional $ parseWhereClauseFlag
+  whereConditions <- if hasWhere == Just True
+                       then Just <$> parseWhereClause
+                       else pure Nothing
+  case whereConditions of
+    Nothing -> return $ UpdateStatement tableName updatesList Nothing 
+    Just conditions ->
+      if null conditions
+        then Parser $ \_ -> Left "At least one condition is required in the where clause"
+        else return $ UpdateStatement tableName updatesList (Just conditions) 
+
+parseWhereClauseFlag :: Parser Bool
+parseWhereClauseFlag = do
+  parseOptionalWhitespace
+  flag <- choice [parseKeyword "where" >> pure True, pure False]
+  case flag of
+    Just b -> return b
+    Nothing -> return False
+
+parseCountWhitespace :: Parser Int
+parseCountWhitespace = length <$> many parseWhitespace
+
+parseUpdates :: Parser [(String, Value)]
+parseUpdates = do
+  updatesList <- parseUpdate `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  return updatesList
+
+parseUpdate :: Parser (String, Value)
+parseUpdate = do
+  columnName <- parseWord
+  parseOptionalWhitespace
+  _ <- parseChar '='
+  parseOptionalWhitespace
+  value <- parseValueAndQuoteFlag
+  return (columnName, value)
+
+parseValueAndQuoteFlag :: Parser (Value)
+parseValueAndQuoteFlag = do
+  parseOptionalWhitespace
+  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
+  parseOptionalWhitespace
+  return val
+
+parseWhereClause :: Parser [Condition]
+parseWhereClause = do
+  _ <- parseWhitespace
+  conditions <- parseConditions
+  return conditions
+
+parseConditions :: Parser [Condition]
+parseConditions = parseCondition `sepBy` (parseKeyword "and" *> parseOptionalWhitespace)
+
+parseCondition :: Parser Condition
+parseCondition = do
+  columnName <- parseWord
+  parseOptionalWhitespace
+  op <- parseRelationalOperator
+  parseOptionalWhitespace
+  value <- parseValue
+  return $ Condition columnName op value
+
+parseRelationalOperator :: Parser RelationalOperator
+parseRelationalOperator =
+      (parseKeyword "=" >> pure Equal)
+  <|> (parseKeyword "!=" >> pure NotEqual)
+  <|> (parseKeyword "<=" >> pure LessThanOrEqual)
+  <|> (parseKeyword ">=" >> pure GreaterThanOrEqual)
+  <|> (parseKeyword "<" >> pure LessThan)
+  <|> (parseKeyword ">" >> pure GreaterThan)
+
+choice :: [Parser a] -> Parser (Maybe a)
+choice [] = pure Nothing
+choice (p:ps) = (Just <$> p) <|> choice ps
 
 serializeTable :: (TableName, DataFrame) -> Either ErrorMessage FileContent
 serializeTable (tableName, dataFrame) = do
@@ -261,7 +473,6 @@ parseTable content = do
             "string" -> Right StringType
             "bool" -> Right BoolType
             _ -> Left $ "Unrecognized data type: " ++ dataType
-
 ----------------------------------------------------------------
 --------- updated parsing stuff
 parseStatement :: String -> Either ErrorMessage ParsedStatement
