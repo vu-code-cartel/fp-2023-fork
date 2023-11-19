@@ -23,7 +23,7 @@ import qualified Data.Yaml as Y
 import GHC.Generics (Generic)
 import Data.Char (toLower, isDigit, isSpace)
 import Lib1 (validateDataFrame)
-import Lib2 (Parser(..),runParser, parseChar, parseKeyword, parseWhitespace, parseWord)
+import Lib2 (parseEndOfStatement,Parser(..),runParser, parseChar, parseKeyword, parseWhitespace, parseWord)
 import Control.Applicative ( many, some, Alternative(empty, (<|>)), optional )
 
 
@@ -95,20 +95,14 @@ parseStatementLib3 :: String -> Either ErrorMessage (TableName, Maybe [String], 
 parseStatementLib3 inp = case runParser parser (dropWhile isSpace inp) of
     Left err1 -> Left err1
     Right (rest, statement) -> case statement of
-        InsertStatement { tableNameInsert = tableName, columnsInsert = columns, valuesInsert = values } -> Right (tableName, columns, values, Nothing)
-        UpdateStatement { tableNameUpdate = tableName, updates = updatesList, whereConditions = conditions } ->
+        InsertStatement { tableNameInsert = tableName, columnsInsert = columns, valuesInsert = values} -> 
+          Right (tableName, columns, values, Nothing)
+        UpdateStatement { tableNameUpdate = tableName, updates = updatesList, whereConditions = conditions} ->
           let (columns, values) = unzip updatesList in
           Right (tableName, Just columns, values, conditions)
-        _ -> Left "Expected insert or update statement"
   where
     parser :: Parser ParsedStatementLib3
-    parser = parseInsertStatement <|> parseUpdateStatement <* optional parseEndOfStatement
-    
-parseEndOfStatement :: Parser ()
-parseEndOfStatement = do
-    _ <- parseChar ';'
-    _ <- many parseWhitespace
-    return ()
+    parser = parseInsertStatement <* parseEndOfStatement <|> parseUpdateStatement <* parseEndOfStatement
 
 parseInsertStatement :: Parser ParsedStatementLib3
 parseInsertStatement = do
@@ -129,7 +123,6 @@ parseInsertStatement = do
         then return $ InsertStatement tableName columns values
         else Parser $ \_ -> Left "Column count does not match the number of values provided"
 
-
 parseColumnNames :: Parser [String]
 parseColumnNames = do
   _ <- parseChar '('
@@ -138,7 +131,6 @@ parseColumnNames = do
   _ <- parseWhitespace
   return names
  
-
 parseValues :: Parser [Value]
 parseValues = do
   _ <- parseChar '('
@@ -209,21 +201,27 @@ parseUpdateStatement = do
                        then Just <$> parseWhereClause
                        else pure Nothing
   case whereConditions of
-    Nothing -> return $ UpdateStatement tableName updatesList Nothing
+    Nothing -> return $ UpdateStatement tableName updatesList Nothing 
     Just conditions ->
       if null conditions
         then Parser $ \_ -> Left "At least one condition is required in the where clause"
-        else return $ UpdateStatement tableName updatesList (Just conditions)
+        else return $ UpdateStatement tableName updatesList (Just conditions) 
 
 parseWhereClauseFlag :: Parser Bool
 parseWhereClauseFlag = do
+  parseOptionalWhitespace
   flag <- choice [parseKeyword "where" >> pure True, pure False]
   case flag of
     Just b -> return b
     Nothing -> return False
 
+parseCountWhitespace :: Parser Int
+parseCountWhitespace = length <$> many parseWhitespace
+
 parseUpdates :: Parser [(String, Value)]
-parseUpdates = parseUpdate `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+parseUpdates = do
+  updatesList <- parseUpdate `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  return updatesList
 
 parseUpdate :: Parser (String, Value)
 parseUpdate = do
@@ -231,8 +229,15 @@ parseUpdate = do
   parseOptionalWhitespace
   _ <- parseChar '='
   parseOptionalWhitespace
-  value <- parseValue
+  value <- parseValueAndQuoteFlag
   return (columnName, value)
+
+parseValueAndQuoteFlag :: Parser (Value)
+parseValueAndQuoteFlag = do
+  parseOptionalWhitespace
+  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
+  parseOptionalWhitespace
+  return val
 
 parseWhereClause :: Parser [Condition]
 parseWhereClause = do
