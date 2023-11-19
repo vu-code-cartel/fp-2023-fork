@@ -186,6 +186,7 @@ renderDataFrameAsTable n (DataFrame columns rows) = header ++ "\n" ++ allRows
         makeCell :: Value -> Int -> String
         makeCell value width = 
             let cellContent = case value of
+                    DateTimeValue d -> d
                     StringValue s -> s 
                     IntegerValue i -> show i
                     BoolValue b -> if b then "True" else "False"
