@@ -50,9 +50,6 @@ type ErrorMessage = String
 data Condition = Condition String RelationalOperator Value
   deriving (Show, Eq)
 
-data Condition = Condition String RelationalOperator Value
-  deriving (Show, Eq)
-
 data ExecutionAlgebra next
   = LoadFile TableName (FileContent -> next)
   | SaveFile TableName FileContent (() -> next)
@@ -77,7 +74,7 @@ data ParsedStatementLib3
 
 type Execution = Free ExecutionAlgebra
 
-data RelationalOperator = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
+data RelationalOperatorCondition = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
   deriving (Show, Eq)
 
 data SerializedColumn = SerializedColumn {
@@ -95,19 +92,8 @@ data SerializedTable = SerializedTable {
 instance Y.FromJSON SerializedColumn
 instance Y.FromJSON SerializedTable
 
-type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 type ColumnName = String
-
-data RelationalOperator
-    = RelEQ
-    | RelNE
-    | RelLT
-    | RelGT
-    | RelLE
-    | RelGE
-    deriving (Show, Eq)
-
 
 data LogicalOperator
     = And
@@ -151,6 +137,15 @@ data ParsedStatement = SelectStatement {
 } | ShowTableStatement {
     table :: TableName
 } | ShowTablesStatement { }
+    deriving (Show, Eq)
+
+data RelationalOperator
+    = RelEQ
+    | RelNE
+    | RelLT
+    | RelGT
+    | RelLE
+    | RelGE
     deriving (Show, Eq)
 
 loadFile :: TableName -> Execution FileContent
@@ -215,13 +210,6 @@ parseValues = do
   _ <- parseChar ')'
   return values
 
-parseValue :: Parser Value
-parseValue = do
-  parseOptionalWhitespace
-  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
-  parseOptionalWhitespace
-  return val
-
 parseOptionalWhitespace :: Parser ()
 parseOptionalWhitespace = many (parseWhitespace *> pure ()) *> pure ()
 
@@ -251,12 +239,6 @@ parseStringWithQuotes = do
   str <- some (parseSatisfy (/= '\''))
   _ <- parseChar '\''
   return str
-
-sepBy :: Parser a -> Parser b -> Parser [a]
-sepBy p sep = do
-  x <- p
-  xs <- many (sep *> p)
-  return (x:xs)
 
 parseSatisfy :: (Char -> Bool) -> Parser Char
 parseSatisfy predicate = Parser $ \inp ->
@@ -316,8 +298,8 @@ parseValueAndQuoteFlag = do
   parseOptionalWhitespace
   return val
 
-parseWhereClause :: Parser [Condition]
-parseWhereClause = do
+parseConditionWhereClause :: Parser [Condition]
+parseConditionWhereClause = do
   _ <- parseWhitespace
   conditions <- parseConditions
   return conditions
@@ -334,8 +316,8 @@ parseCondition = do
   value <- parseValue
   return $ Condition columnName op value
 
-parseRelationalOperator :: Parser RelationalOperator
-parseRelationalOperator =
+parseConditionRelationalOperator :: Parser RelationalOperatorCondition
+parseConditionRelationalOperator =
       (parseKeyword "=" >> pure Equal)
   <|> (parseKeyword "!=" >> pure NotEqual)
   <|> (parseKeyword "<=" >> pure LessThanOrEqual)
@@ -473,6 +455,7 @@ parseTable content = do
             "string" -> Right StringType
             "bool" -> Right BoolType
             _ -> Left $ "Unrecognized data type: " ++ dataType
+
 ----------------------------------------------------------------
 --------- updated parsing stuff
 parseStatement :: String -> Either ErrorMessage ParsedStatement
@@ -565,6 +548,15 @@ parseSelectAllStatement = do
 liftEither :: Either ErrorMessage a -> Parser a
 liftEither = either (Parser . const . Left) pure
 
+parseRelationalOperator :: Parser RelationalOperator
+parseRelationalOperator =
+      (parseKeyword "=" >> pure RelEQ)
+  <|> (parseKeyword "!=" >> pure RelNE)
+  <|> (parseKeyword "<=" >> pure RelLE)
+  <|> (parseKeyword ">=" >> pure RelGE)
+  <|> (parseKeyword "<" >> pure RelLT)
+  <|> (parseKeyword ">" >> pure RelGT)
+
 --where clause parsing
 
 parseWhereClause :: Parser WhereClause
@@ -581,15 +573,6 @@ parseWhereClause = do
             op <- optional (parseWhitespace >> parseLogicalOperator)
             _ <- optional parseWhitespace
             pure (crit, op)
-
-parseRelationalOperator :: Parser RelationalOperator
-parseRelationalOperator =
-      (parseKeyword "=" >> pure RelEQ)
-  <|> (parseKeyword "!=" >> pure RelNE)
-  <|> (parseKeyword "<=" >> pure RelLE)
-  <|> (parseKeyword ">=" >> pure RelGE)
-  <|> (parseKeyword "<" >> pure RelLT)
-  <|> (parseKeyword ">" >> pure RelGT)
 
 parseLogicalOperator :: Parser LogicalOperator
 parseLogicalOperator = parseKeyword "AND" >> pure And
