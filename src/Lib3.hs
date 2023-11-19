@@ -1,14 +1,12 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-
 module Lib3
-  ( 
-    executeSql,
+  ( executeSql,
     Execution,
     ExecutionAlgebra(..),
-    parseStatement,
-    executeStatement
+    executeStatement,
+    parseStatement
   )
 where
 
@@ -25,29 +23,30 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Yaml as Y
 import GHC.Generics (Generic)
-import Data.Char (toLower, isDigit, isSpace)
+import Data.Char (toLower)
 import Lib1 (validateDataFrame)
-import Lib2 (parseEndOfStatement,Parser(..),runParser, parseChar, parseKeyword, parseWhitespace, parseWord)
-import Control.Applicative ( many, some, Alternative(empty, (<|>)), optional )
-
-import Data.Char (toLower, isSpace, isAlphaNum)
+import Data.Char (toLower, isSpace, isAlphaNum, isDigit)
 import Lib2(
     Parser(..),
+    RelationalOperator(..),
+    Aggregate(..),
+    AggregateFunction(..),
+    LogicalOperator(..),
     parseChar,
-    parseValue,
-    parseWord,
-    parseKeyword,
-    parseEndOfStatement,
     parseWhitespace,
-    sepBy
+    parseKeyword,
+    parseWord,
+    parseValue,
+    sepBy,
+    parseEndOfStatement,
+    parseRelationalOperator,
     )
 import InMemoryTables (database)
 
 type TableName = String
 type FileContent = String
-type ErrorMessage = String
 
-data Condition = Condition String RelationalOperator Value
+data Condition = Condition String RelationalOperator' Value
   deriving (Show, Eq)
 
 data ExecutionAlgebra next
@@ -58,6 +57,8 @@ data ExecutionAlgebra next
   | InsertData TableName [[Y.Value]] (() -> next)
   -- feel free to add more constructors here
   deriving Functor
+
+type Execution = Free ExecutionAlgebra
 
 data ParsedStatementLib3
   = InsertStatement {
@@ -72,9 +73,7 @@ data ParsedStatementLib3
     }
   deriving (Show, Eq)
 
-type Execution = Free ExecutionAlgebra
-
-data RelationalOperatorCondition = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
+data RelationalOperator' = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
   deriving (Show, Eq)
 
 data SerializedColumn = SerializedColumn {
@@ -88,16 +87,13 @@ data SerializedTable = SerializedTable {
     rows :: [[Y.Value]]
 } deriving (Show, Eq, Generic)
 
-
 instance Y.FromJSON SerializedColumn
 instance Y.FromJSON SerializedTable
 
+type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 type ColumnName = String
 
-data LogicalOperator
-    = And
-    deriving (Show, Eq)
 
 data Expression
     = ValueExpression Value
@@ -107,16 +103,8 @@ data Expression
 data WhereCriterion = WhereCriterion Expression RelationalOperator Expression
     deriving (Show, Eq)
 
-data AggregateFunction
-    = Min
-    | Sum
-    deriving (Show, Eq)
-
 data SystemFunction
     = Now
-    deriving (Show, Eq)
-
-data Aggregate = Aggregate AggregateFunction ColumnName 
     deriving (Show, Eq)
 
 data SelectData
@@ -139,15 +127,6 @@ data ParsedStatement = SelectStatement {
 } | ShowTablesStatement { }
     deriving (Show, Eq)
 
-data RelationalOperator
-    = RelEQ
-    | RelNE
-    | RelLT
-    | RelGT
-    | RelLE
-    | RelGE
-    deriving (Show, Eq)
-
 loadFile :: TableName -> Execution FileContent
 loadFile name = liftF $ LoadFile name id
 
@@ -156,7 +135,6 @@ saveFile tableName fileContent = liftF $ SaveFile tableName fileContent id
 
 getTime :: Execution UTCTime
 getTime = liftF $ GetTime id
-
 
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = liftF $ ExecutePure sql id
@@ -187,7 +165,7 @@ parseInsertStatement = do
   columns <- optional parseColumnNames
   _ <- parseKeyword "values"
   parseOptionalWhitespace
-  values <- parseValues
+  values <- parseValues'
   case columns of
     Nothing -> return $ InsertStatement tableName columns values
     Just cols ->
@@ -203,12 +181,19 @@ parseColumnNames = do
   _ <- parseWhitespace
   return names
  
-parseValues :: Parser [Value]
-parseValues = do
+parseValues' :: Parser [Value]
+parseValues' = do
   _ <- parseChar '('
   values <- parseValue `sepBy` (parseChar ',' *> parseOptionalWhitespace)
   _ <- parseChar ')'
   return values
+
+parseValue' :: Parser Value
+parseValue' = do
+  parseOptionalWhitespace
+  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
+  parseOptionalWhitespace
+  return val
 
 parseOptionalWhitespace :: Parser ()
 parseOptionalWhitespace = many (parseWhitespace *> pure ()) *> pure ()
@@ -257,7 +242,7 @@ parseUpdateStatement = do
   updatesList <- parseUpdates
   hasWhere <- optional $ parseWhereClauseFlag
   whereConditions <- if hasWhere == Just True
-                       then Just <$> parseWhereClause
+                       then Just <$> parseWhereClause'
                        else pure Nothing
   case whereConditions of
     Nothing -> return $ UpdateStatement tableName updatesList Nothing 
@@ -298,8 +283,8 @@ parseValueAndQuoteFlag = do
   parseOptionalWhitespace
   return val
 
-parseConditionWhereClause :: Parser [Condition]
-parseConditionWhereClause = do
+parseWhereClause' :: Parser [Condition]
+parseWhereClause' = do
   _ <- parseWhitespace
   conditions <- parseConditions
   return conditions
@@ -311,13 +296,13 @@ parseCondition :: Parser Condition
 parseCondition = do
   columnName <- parseWord
   parseOptionalWhitespace
-  op <- parseRelationalOperator
+  op <- parseRelationalOperator'
   parseOptionalWhitespace
-  value <- parseValue
+  value <- parseValue'
   return $ Condition columnName op value
 
-parseConditionRelationalOperator :: Parser RelationalOperatorCondition
-parseConditionRelationalOperator =
+parseRelationalOperator' :: Parser RelationalOperator'
+parseRelationalOperator' =
       (parseKeyword "=" >> pure Equal)
   <|> (parseKeyword "!=" >> pure NotEqual)
   <|> (parseKeyword "<=" >> pure LessThanOrEqual)
@@ -518,6 +503,7 @@ parseSelectStatement = do
     updatedSelectData <- liftEither $ updateUnspecifiedTableNames tableNames selectData
     updatedWhereClause <- liftEither $ updateUnspecifiedTableNamesInWhereClause tableNames whereClause
 
+    -- Perform validations on the updated selectData
     case validateAll updatedSelectData tableNames updatedWhereClause of
         Left err -> Parser $ \_ -> Left err
         Right _ -> pure $ SelectStatement tableNames updatedSelectData updatedWhereClause
@@ -547,15 +533,6 @@ parseSelectAllStatement = do
 
 liftEither :: Either ErrorMessage a -> Parser a
 liftEither = either (Parser . const . Left) pure
-
-parseRelationalOperator :: Parser RelationalOperator
-parseRelationalOperator =
-      (parseKeyword "=" >> pure RelEQ)
-  <|> (parseKeyword "!=" >> pure RelNE)
-  <|> (parseKeyword "<=" >> pure RelLE)
-  <|> (parseKeyword ">=" >> pure RelGE)
-  <|> (parseKeyword "<" >> pure RelLT)
-  <|> (parseKeyword ">" >> pure RelGT)
 
 --where clause parsing
 
@@ -596,6 +573,7 @@ parseWhereCriterion = do
     _ <- optional parseWhitespace
     rightExpr <- parseExpression <|> Parser (\_ -> Left "Missing right-hand expression in criterion.")
     pure $ WhereCriterion leftExpr op rightExpr
+
 
 parseSelectData :: Parser SelectData
 parseSelectData = tryParseSystemFunction <|> tryParseAggregate <|> tryParseColumn
@@ -701,17 +679,18 @@ validateColumnsInDatabase selectData = traverse_ validateColumnExists selectData
         checkColumnExistsInTable columnName tableName
     validateColumnExists (SelectAggregate (Aggregate _ columnName) (Just tableName)) =
         checkColumnExistsInTable columnName tableName
-    validateColumnExists _ = Right ()
+    validateColumnExists _ = Right ()  -- No validation needed for system functions or unspecified table names
 
--- Validate if all specified tablenames exist in the database
+-- Validate if all specified table names exist in the database
 validateTablesExistInDatabase :: [TableName] -> Either ErrorMessage ()
 validateTablesExistInDatabase = traverse_ getTableByName
 
+-- Validate if columns reference a table included in the FROM clause or exist in any of the specified tables
 validateTableNamesInSelectData :: [TableName] -> SelectQuery -> Either ErrorMessage ()
 validateTableNamesInSelectData tableNames query =
     if all (\sd -> isTableNameValid sd || isColumnInAnyTable sd) query
     then Right ()
-    else Left "Columns reference a table not included in the FROM clause"
+    else Left "One or more columns reference a table not included in the FROM clause or do not exist in any specified table."
   where
     isTableNameValid (SelectColumn _ (Just tableName)) = tableName `elem` tableNames
     isTableNameValid (SelectAggregate _ (Just tableName)) = tableName `elem` tableNames
@@ -728,12 +707,12 @@ updateUnspecifiedTableNames tableNames selectQuery = traverse updateSelectData s
     updateSelectData (SelectColumn columnName Nothing) =
         case findColumnTable columnName tableNames of
             Just tableName -> Right $ SelectColumn columnName (Just tableName)
-            Nothing -> Right $ SelectColumn columnName Nothing 
+            Nothing -> Right $ SelectColumn columnName Nothing  -- Column not found in any table
     updateSelectData (SelectAggregate (Aggregate aggFunc columnName) Nothing) =
         case findColumnTable columnName tableNames of
             Just tableName -> Right $ SelectAggregate (Aggregate aggFunc columnName) (Just tableName)
             Nothing -> Right $ SelectAggregate (Aggregate aggFunc columnName) Nothing
-    updateSelectData sd = Right sd
+    updateSelectData sd = Right sd  -- No update needed for other cases
 
     findColumnTable :: ColumnName -> [TableName] -> Maybe TableName
     findColumnTable columnName = find (columnExistsIn columnName)
@@ -770,7 +749,7 @@ validateWhereCriteria tableNames (WhereCriterion leftExpr _ rightExpr) = do
                 if columnExistsInAnyTable columnName tableNames
                 then Right ()
                 else Left $ "Column '" ++ columnName ++ "' does not exist in any of the specified tables."
-    validateExpression _ = Right ()
+    validateExpression _ = Right ()  -- No validation needed for ValueExpression
 
 updateUnspecifiedTableNamesInWhereClause :: [TableName] -> Maybe WhereClause -> Either ErrorMessage (Maybe WhereClause)
 updateUnspecifiedTableNamesInWhereClause tableNames maybeWhereClause = 
@@ -788,8 +767,8 @@ updateUnspecifiedTableNamesInWhereClause tableNames maybeWhereClause =
     updateExpression (ColumnExpression columnName Nothing) =
         case findColumnTable columnName tableNames of
             Just tableName -> Right $ ColumnExpression columnName (Just tableName)
-            Nothing -> Right $ ColumnExpression columnName Nothing 
-    updateExpression expr = Right expr 
+            Nothing -> Right $ ColumnExpression columnName Nothing -- Column not found in any table
+    updateExpression expr = Right expr -- No update needed for other cases
 
 -- --util functions
 
@@ -819,7 +798,7 @@ createDataFrameFromSelectStatement (SelectStatement tables _ _) = do
 createDataFrameFromSelectStatement _ = Left "Not a SelectStatement"
 
 findColumnIndex :: ColumnName -> [Column] -> Either ErrorMessage Int
-findColumnIndex columnName columns = findColumnIndex' columnName columns 0 
+findColumnIndex columnName columns = findColumnIndex' columnName columns 0 -- Start with index 0
 
 findColumnIndex' :: ColumnName -> [Column] -> Int -> Either ErrorMessage Int
 findColumnIndex' columnName [] _ = Left $ "Column with name '" ++ columnName ++ "' does not exist in the table."
@@ -834,7 +813,7 @@ filterDataFrameByWhereClause (DataFrame columns rows) whereClause =
     in DataFrame columns filteredRows
 
 evaluateWhereClause :: WhereClause -> [Column] -> Row -> Bool
-evaluateWhereClause [] _ _ = True 
+evaluateWhereClause [] _ _ = True  -- If WhereClause is empty, include all rows
 evaluateWhereClause ((criterion, logicalOp):rest) columns row =
     let criterionResult = evaluateCriterion criterion columns row
     in case logicalOp of
@@ -913,8 +892,11 @@ safeGet idx xs = if idx < length xs then Just (xs !! idx) else Nothing
 calculateAggregatesFromDataFrame :: DataFrame -> [SelectData] -> UTCTime -> Either ErrorMessage DataFrame
 calculateAggregatesFromDataFrame (DataFrame inputColumns rows) selectData currentTime =
     let
+        -- Identify and process system function columns
         systemFunctionColumns = mapMaybe (systemFunctionToColumn currentTime) selectData
         systemFunctionValues = selectSystemFunctionValues systemFunctionColumns currentTime
+
+        -- Proceed with aggregate data calculation
         aggregateData = [(func, getFullColumnName colName maybeTableName) 
                          | SelectAggregate (Aggregate func colName) maybeTableName <- selectData]
         aggregateResults = traverse (\(func, fullColName) -> calculateAggregate rows fullColName inputColumns func) aggregateData
@@ -922,16 +904,19 @@ calculateAggregatesFromDataFrame (DataFrame inputColumns rows) selectData curren
     in case aggregateResults of
         Left errMsg -> Left errMsg
         Right aggregatedValues -> 
+            -- Construct DataFrame for aggregated values
             let aggDataFrame@(DataFrame aggColumns aggRows) = constructDataFrame inputColumns aggregateData aggregatedValues
+
+                -- Combine aggregated DataFrame columns with system function columns
                 finalColumns = aggColumns ++ systemFunctionColumns
-                combinedRow = head aggRows ++ systemFunctionValues
+                combinedRow = head aggRows ++ systemFunctionValues  -- Assuming aggRows has at least one row
             in Right $ DataFrame finalColumns [combinedRow]
 
   where
     constructDataFrame :: [Column] -> [(AggregateFunction, ColumnName)] -> [Value] -> DataFrame
     constructDataFrame allColumns aggData aggValues =
         let aggColumns = map (toAggregateColumn allColumns) aggData
-            aggRows = [aggValues]
+            aggRows = [aggValues]  -- Each aggregated value in its own column
         in DataFrame aggColumns aggRows
 
 
@@ -962,13 +947,13 @@ calculateAggregatesFromDataFrame (DataFrame inputColumns rows) selectData curren
         calculateStringAggregate _   = Left "Unsupported string aggregation"
 
         minimumStringOrDefault :: [String] -> Value
-        minimumStringOrDefault [] = StringValue ""
+        minimumStringOrDefault [] = StringValue "" -- Default value for empty lists
         minimumStringOrDefault xs = StringValue $ minimum xs
 
         calculateBoolAggregate Sum = IntegerValue $ sum (map boolToInt boolValues)
         calculateBoolAggregate Min = IntegerValue $ minimumOrDefault (map boolToInt boolValues)
 
-        minimumOrDefault [] = 0
+        minimumOrDefault [] = 0  -- Default value for empty lists
         minimumOrDefault xs = minimum xs
 
         boolToInt True  = 1
@@ -997,6 +982,10 @@ calculateAggregatesFromDataFrame (DataFrame inputColumns rows) selectData curren
     extractBool :: Value -> Maybe Bool
     extractBool (BoolValue b) = Just b
     extractBool _ = Nothing
+-----------------------------------------------
+
+-- -- Executes a parsed statement. Produces a DataFrame. Uses
+-- -- InMemoryTables.databases as a source of data.
 
 executeStatement :: UTCTime -> ParsedStatement -> Either ErrorMessage DataFrame
 executeStatement currentTime (SelectStatement tables query maybeWhereClause) =

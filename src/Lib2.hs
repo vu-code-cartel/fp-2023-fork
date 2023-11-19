@@ -36,8 +36,8 @@ module Lib2
     parseWhitespace,
     sepBy,
     parseWhereClause,
-    isSpace
-  )
+    parseRelationalOperator,
+    )
 where
 
 import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row)
