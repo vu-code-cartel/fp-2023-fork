@@ -28,7 +28,8 @@ module Lib2
     parseWhitespace,
     parseWord,
     parseValue,
-    runParser
+    runParser,
+    parseEndOfStatement
   )
 where
 
