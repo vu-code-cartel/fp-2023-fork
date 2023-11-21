@@ -78,7 +78,6 @@ type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 type ColumnName = String
 
-
 data Expression
     = ValueExpression Value
     | ColumnExpression ColumnName (Maybe TableName)
@@ -346,7 +345,6 @@ validateAll updatedSelectData tableNames maybeWhereClause = do
     case maybeWhereClause of
         Just whereClause -> traverse_ (validateWhereCriteria tableNames . fst) whereClause
         Nothing -> Right ()
-
 
 parseSelectAllStatement :: Parser ParsedStatement
 parseSelectAllStatement = do
