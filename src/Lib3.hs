@@ -60,19 +60,6 @@ data ExecutionAlgebra next
 
 type Execution = Free ExecutionAlgebra
 
-data ParsedStatementLib3
-  = InsertStatement {
-      tableNameInsert :: TableName,
-      columnsInsert :: Maybe [String],
-      valuesInsert :: [Value]
-    }
-  | UpdateStatement {
-      tableNameUpdate :: TableName,
-      updates :: [(String, Value)],
-      whereConditions :: Maybe [Condition]
-    }
-  deriving (Show, Eq)
-
 data RelationalOperator' = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
   deriving (Show, Eq)
 
@@ -124,8 +111,16 @@ data ParsedStatement = SelectStatement {
     function :: SystemFunction
 } | ShowTableStatement {
     table :: TableName
-} | ShowTablesStatement { }
-    deriving (Show, Eq)
+} | ShowTablesStatement { 
+} | InsertStatement {
+      tableNameInsert :: TableName,
+      columnsInsert :: Maybe [String],
+      valuesInsert :: [Value]
+} | UpdateStatement {
+      tableNameUpdate :: TableName,
+      updates :: [(String, Value)],
+      whereConditions :: Maybe [Condition]
+} deriving (Show, Eq)
 
 loadFile :: TableName -> Execution FileContent
 loadFile name = liftF $ LoadFile name id
@@ -151,10 +146,10 @@ parseStatementLib3 inp = case runParser parser (dropWhile isSpace inp) of
           let (columns, values) = unzip updatesList in
           Right (tableName, Just columns, values, conditions)
   where
-    parser :: Parser ParsedStatementLib3
+    parser :: Parser ParsedStatement
     parser = parseInsertStatement <* parseEndOfStatement <|> parseUpdateStatement <* parseEndOfStatement
 
-parseInsertStatement :: Parser ParsedStatementLib3
+parseInsertStatement :: Parser ParsedStatement
 parseInsertStatement = do
   _ <- parseKeyword "insert"
   _ <- parseWhitespace
@@ -231,7 +226,7 @@ parseSatisfy predicate = Parser $ \inp ->
         [] -> Left "Empty input"
         (x:xs) -> if predicate x then Right (xs, x) else Left ("Unexpected character: " ++ [x])
 
-parseUpdateStatement :: Parser ParsedStatementLib3
+parseUpdateStatement :: Parser ParsedStatement
 parseUpdateStatement = do
   _ <- parseKeyword "update"
   _ <- parseWhitespace
