@@ -69,10 +69,10 @@ runExecuteIO (Free step) = do
           readFile (getTableFilePath tableName) >>= return . next
         runStep (Lib3.SaveFile tableName fileContent next) = 
           writeFile (getTableFilePath tableName) fileContent >>= return . next
-        runStep (Lib3.ExecutePure sql next) = do
-          currentTime <- getCurrentTime
-          let result = Lib3.parseStatement sql >>= (\parsedStmt -> Lib3.executeStatement currentTime parsedStmt)
-          return $ next result
+        runStep (Lib3.LoadAndParseTable tableName next) = do
+          fileContent <- readFile (getTableFilePath tableName)
+          let parsedResult = Lib3.parseTable fileContent
+          return $ next parsedResult
 
         getTableFilePath :: String -> String
         getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"
