@@ -502,24 +502,10 @@ parseTable content = do
 ----------------------------------------------------------------
 --------- updated parsing stuff
 parseStatement :: String -> Either ErrorMessage ParsedStatement
-parseStatement inp = case runParser parser (dropWhile isSpace inp) of
-    Left err1 -> Left err1
-    Right (rest, statement) -> case statement of
-        SelectAllStatement _ _ -> case runParser parseEndOfStatement rest of
-            Left err2 -> Left err2
-            Right _ -> Right statement
-        SelectStatement _ _ _ -> case runParser parseEndOfStatement rest of
-            Left err2 -> Left err2
-            Right _ -> Right statement
-        SystemFunctionStatement _ -> case runParser parseEndOfStatement rest of
-            Left err2 -> Left err2
-            Right _ -> Right statement
-        ShowTableStatement _ -> case runParser parseEndOfStatement rest of
-            Left err2 -> Left err2
-            Right _ -> Right statement
-        ShowTablesStatement -> case runParser parseEndOfStatement rest of
-            Left err2 -> Left err2
-            Right _ -> Right statement
+parseStatement inp = do
+    (rest, statement) <- runParser parser (dropWhile isSpace inp)
+    _ <- runParser parseEndOfStatement rest
+    return statement
     where
         parser :: Parser ParsedStatement
         parser = parseSelectStatement
