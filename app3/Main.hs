@@ -84,4 +84,4 @@ runExecuteIO (Free step) = do
         dbFormat :: String
         dbFormat = ".yaml"
         getTableFilePath :: String -> String
-        getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"
+        getTableFilePath tableName = dbDirectory ++ [pathSeparator] ++ tableName ++ dbFormat
