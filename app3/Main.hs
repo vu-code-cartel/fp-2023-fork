@@ -16,6 +16,8 @@ import System.Console.Repline
     evalRepl,
   )
 import System.Console.Terminal.Size (Window, size, width)
+import System.Directory (listDirectory)
+import System.FilePath (dropExtension, pathSeparator, takeExtension)
 
 type Repl a = HaskelineT IO a
 
@@ -72,6 +74,14 @@ runExecuteIO (Free step) = do
             case Lib3.serializeTable table of
                 Left err -> error err
                 Right serializedTable -> writeFile (getTableFilePath $ fst table) serializedTable >>= return . next
+        runStep (Lib3.GetTableNames next) = do
+            files <- listDirectory dbDirectory
+            let tableNames = foldl (\acc fileName -> if takeExtension fileName == dbFormat then dropExtension fileName : acc else acc) [] files
+            return $ next tableNames
 
+        dbDirectory :: String
+        dbDirectory = "db"
+        dbFormat :: String
+        dbFormat = ".yaml"
         getTableFilePath :: String -> String
-        getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"
+        getTableFilePath tableName = dbDirectory ++ [pathSeparator] ++ tableName ++ dbFormat
