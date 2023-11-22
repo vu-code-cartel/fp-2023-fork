@@ -180,13 +180,15 @@ executeSql sql = case parseStatement sql of
         loadResult <- loadTable table
         case loadResult of 
             Left errorMsg -> return $ Left errorMsg
-            Right (tableName, dataframe) -> return $ Right dataframe
+            Right (_, dataframe) -> return $ Right dataframe
+    Right ShowTablesStatement -> do
+        showTablesFrame <- createShowTablesFrame
+        return $ Right showTablesFrame
     Right (SystemFunctionStatement function) -> do
         case function of
             Now -> do
                 nowDataFrame <- createNowDataFrame
                 return $ Right nowDataFrame
-    Right _ -> return $ Left "Unsupported SQL statement type"
 
 loadTables :: [TableName] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
 loadTables [] = return $ Right []
@@ -930,3 +932,17 @@ createNowDataFrame = do
     let columns = [Column "NOW()" DateTimeType]
     let rows = [[DateTimeValue $ formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S" currentTime]]
     return $ DataFrame columns rows
+
+createShowTablesFrame :: Execution DataFrame
+createShowTablesFrame = do
+    tableNames <- getTableNames
+    let columns = [Column "Tables" StringType]
+    let rows = createRows tableNames []
+    return $ DataFrame columns rows
+    where
+        createRows :: [TableName] -> [[Value]] -> [[Value]]
+        createRows [] acc = acc
+        createRows (x:xs) acc = createRows xs (createRow x : acc)
+
+        createRow :: TableName -> [Value]
+        createRow tableName = [StringValue tableName]
