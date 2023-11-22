@@ -87,60 +87,60 @@ main = hspec $ do
     it "handles show table without table name" $ do
       Lib2.parseStatement "SHOW TABLE" `shouldSatisfy` isLeft
     it "parses show table statement with uppercase" $ do
-      Lib2.parseStatement "SHOW TABLE Users;" `shouldBe` Right (ShowTableStatement "Users")
+      Lib2.parseStatement "SHOW TABLE Users;" `shouldBe` Right (Lib2.ShowTableStatement "Users")
     it "parses show table statement with lowercase alphanum and underscore table name" $ do
-      Lib2.parseStatement "show table _organization_123" `shouldBe` Right (ShowTableStatement "_organization_123")
+      Lib2.parseStatement "show table _organization_123" `shouldBe` Right (Lib2.ShowTableStatement "_organization_123")
     it "parses show table statement with mixed casing and whitespace" $ do
-      Lib2.parseStatement "   ShOW   taBlE    Hello_WORLD   ;  " `shouldBe` Right (ShowTableStatement "Hello_WORLD")
+      Lib2.parseStatement "   ShOW   taBlE    Hello_WORLD   ;  " `shouldBe` Right (Lib2.ShowTableStatement "Hello_WORLD")
     it "parses show tables statement with uppercase" $ do
-      Lib2.parseStatement "SHOW TABLES;" `shouldBe` Right ShowTablesStatement
+      Lib2.parseStatement "SHOW TABLES;" `shouldBe` Right Lib2.ShowTablesStatement
     it "handles whitespace error in show tables statement" $ do
       Lib2.parseStatement "ShowTables;" `shouldSatisfy` isLeft
     it "handles unexpected symbols after end of the show tables statement" $ do
       Lib2.parseStatement "show tables;a" `shouldSatisfy` isLeft
     it "parses show tables statement with mixed casing" $ do
-      Lib2.parseStatement "ShOW taBLeS;" `shouldBe` Right ShowTablesStatement
+      Lib2.parseStatement "ShOW taBLeS;" `shouldBe` Right Lib2.ShowTablesStatement
     it "parses show tables statement with whitespaces" $ do
-      Lib2.parseStatement "show      tables    ;  " `shouldBe` Right ShowTablesStatement
+      Lib2.parseStatement "show      tables    ;  " `shouldBe` Right Lib2.ShowTablesStatement
     it "parses show tables statement lowercase" $ do
-      Lib2.parseStatement "show tables;" `shouldBe` Right ShowTablesStatement
+      Lib2.parseStatement "show tables;" `shouldBe` Right Lib2.ShowTablesStatement
     it "parses show tables statement Uppercase" $ do
-      Lib2.parseStatement "SHOW TABLES;" `shouldBe` Right ShowTablesStatement
+      Lib2.parseStatement "SHOW TABLES;" `shouldBe` Right Lib2.ShowTablesStatement
     it "parses show tables statement with mixed casing and whitespace" $ do
-      Lib2.parseStatement "   ShOW   taBLeS    ;  " `shouldBe` Right ShowTablesStatement
+      Lib2.parseStatement "   ShOW   taBLeS    ;  " `shouldBe` Right Lib2.ShowTablesStatement
     it "handles invalid statement" $ do
       Lib2.parseStatement "shw tables;" `shouldSatisfy` isLeft
     it "handles invalid SELECT statement" $ do
       Lib2.parseStatement "SELECT id name FROM employees;" `shouldSatisfy` isLeft
     it "handles basic SELECT statement" $ do
-      Lib2.parseStatement "SELECT a, b FROM table;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a",SelectColumn "b"], whereClause = Nothing})
+      Lib2.parseStatement "SELECT a, b FROM table;" `shouldBe` Right (Lib2.SelectStatement {Lib2.table = "table", Lib2.query = [Lib2.SelectColumn "a",Lib2.SelectColumn "b"], Lib2.whereClause = Nothing})
     it "handles basic SELECT statement with columns without whitespace separator" $ do
-      Lib2.parseStatement "SELECT a,b FROM table;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a",SelectColumn "b"], whereClause = Nothing})
+      Lib2.parseStatement "SELECT a,b FROM table;" `shouldBe` Right (Lib2.SelectStatement {Lib2.table = "table", Lib2.query = [Lib2.SelectColumn "a",Lib2.SelectColumn "b"], Lib2.whereClause = Nothing})
     it "handles basic SELECT statement with columns without  separator" $ do
       Lib2.parseStatement "SELECT a b FROM table;" `shouldSatisfy` isLeft
     it "handles basic SELECT statement with multiple aggregates" $ do
-      Lib2.parseStatement "SELECT MIN(a), SUM(b) FROM table;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectAggregate (Aggregate Min "a"), SelectAggregate (Aggregate Sum "b")], whereClause = Nothing})
+      Lib2.parseStatement "SELECT MIN(a), SUM(b) FROM table;" `shouldBe` Right (Lib2.SelectStatement {Lib2.table = "table", Lib2.query = [Lib2.SelectAggregate (Lib2.Aggregate Min "a"), Lib2.SelectAggregate (Lib2.Aggregate Sum "b")], Lib2.whereClause = Nothing})
     it "handles SELECT statement that mixes columns and aggregates" $ do
       Lib2.parseStatement "SELECT MIN(a), b FROM table;" `shouldSatisfy` isLeft
     it "handles SELECT statement with multiple WHERE criterion that compare columns" $ do
-      Lib2.parseStatement "SELECT a, b, c, d FROM table WHERE a=b AND b!=c AND c>d AND d<e AND a>=b AND b<=c;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a",SelectColumn "b",SelectColumn "c",SelectColumn "d"], whereClause = Just [(WhereCriterion (ColumnExpression "a") RelEQ (ColumnExpression "b"),Just And),(WhereCriterion (ColumnExpression "b") RelNE (ColumnExpression "c"),Just And),(WhereCriterion (ColumnExpression "c") RelGT (ColumnExpression "d"),Just And),(WhereCriterion (ColumnExpression "d") RelLT (ColumnExpression "e"),Just And),(WhereCriterion (ColumnExpression "a") RelGE (ColumnExpression "b"),Just And),(WhereCriterion (ColumnExpression "b") RelLE (ColumnExpression "c"),Nothing)]})
+      Lib2.parseStatement "SELECT a, b, c, d FROM table WHERE a=b AND b!=c AND c>d AND d<e AND a>=b AND b<=c;" `shouldBe` Right (Lib2.SelectStatement {Lib2.table = "table", Lib2.query = [Lib2.SelectColumn "a",Lib2.SelectColumn "b",Lib2.SelectColumn "c",Lib2.SelectColumn "d"], Lib2.whereClause = Just [(Lib2.WhereCriterion (Lib2.ColumnExpression "a") RelEQ (Lib2.ColumnExpression "b"),Just And),(Lib2.WhereCriterion (Lib2.ColumnExpression "b") RelNE (Lib2.ColumnExpression "c"),Just And),(Lib2.WhereCriterion (Lib2.ColumnExpression "c") RelGT (Lib2.ColumnExpression "d"),Just And),(Lib2.WhereCriterion (Lib2.ColumnExpression "d") RelLT (Lib2.ColumnExpression "e"),Just And),(Lib2.WhereCriterion (Lib2.ColumnExpression "a") RelGE (Lib2.ColumnExpression "b"),Just And),(Lib2.WhereCriterion (Lib2.ColumnExpression "b") RelLE (Lib2.ColumnExpression "c"),Nothing)]})
     it "handles SELECT statement with multiple WHERE criterion that compare strings" $ do
-        Lib2.parseStatement "SELECT a FROM table WHERE 'aa'='aa' AND 'a'!='b' 'b'<'c';" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a"], whereClause = Just [(WhereCriterion (ValueExpression (StringValue
-        "aa")) RelEQ (ValueExpression (StringValue "aa")),Just And),(WhereCriterion (ValueExpression (StringValue "a")) RelNE (ValueExpression
-        (StringValue "b")),Nothing),(WhereCriterion (ValueExpression (StringValue "b")) RelLT (ValueExpression (StringValue "c")),Nothing)]})
+        Lib2.parseStatement "SELECT a FROM table WHERE 'aa'='aa' AND 'a'!='b' 'b'<'c';" `shouldBe` Right (Lib2.SelectStatement {Lib2.table = "table", Lib2.query = [Lib2.SelectColumn "a"], Lib2.whereClause = Just [(Lib2.WhereCriterion (Lib2.ValueExpression (StringValue
+        "aa")) RelEQ (Lib2.ValueExpression (StringValue "aa")),Just And),(Lib2.WhereCriterion (Lib2.ValueExpression (StringValue "a")) RelNE (Lib2.ValueExpression
+        (StringValue "b")),Nothing),(Lib2.WhereCriterion (Lib2.ValueExpression (StringValue "b")) RelLT (Lib2.ValueExpression (StringValue "c")),Nothing)]})
     it "handles SELECT statement with multiple WHERE criterion that compare strings and columns" $ do
-      Lib2.parseStatement "SELECT a FROM table WHERE a='aa' AND aaa!='b' AND 'b'<aaa;" `shouldBe` Right (SelectStatement {table = "table", query = [SelectColumn "a"], whereClause = Just [(WhereCriterion (ColumnExpression "a") RelEQ (ValueExpression (StringValue "aa")),Just And),(WhereCriterion (ColumnExpression "aaa") RelNE (ValueExpression (StringValue "b")),Just And),(WhereCriterion (ValueExpression (StringValue "b")) RelLT (ColumnExpression "aaa"),Nothing)]})
+      Lib2.parseStatement "SELECT a FROM table WHERE a='aa' AND aaa!='b' AND 'b'<aaa;" `shouldBe` Right (Lib2.SelectStatement {Lib2.table = "table", Lib2.query = [Lib2.SelectColumn "a"], Lib2.whereClause = Just [(Lib2.WhereCriterion (Lib2.ColumnExpression "a") Lib2.RelEQ (Lib2.ValueExpression (StringValue "aa")),Just And),(Lib2.WhereCriterion (Lib2.ColumnExpression "aaa") RelNE (Lib2.ValueExpression (StringValue "b")),Just And),(Lib2.WhereCriterion (Lib2.ValueExpression (StringValue "b")) RelLT (Lib2.ColumnExpression "aaa"),Nothing)]})
   describe "Lib2.executeStatement" $ do
     it "executes show tables statement" $ do
-      Lib2.executeStatement ShowTablesStatement `shouldSatisfy` isRight
+      Lib2.executeStatement Lib2.ShowTablesStatement `shouldSatisfy` isRight
     it "executes show table <name> statement" $ do
-      Lib2.executeStatement ShowTableStatement {table = "employees"} `shouldSatisfy` isRight
+      Lib2.executeStatement Lib2.ShowTableStatement {Lib2.table = "employees"} `shouldSatisfy` isRight
     it "executes simple select statement" $ do
-      Lib2.executeStatement SelectStatement {table = "employees", query = [SelectColumn "id"], whereClause = Nothing} `shouldSatisfy` isRight
+      Lib2.executeStatement Lib2.SelectStatement {Lib2.table = "employees", Lib2.query = [Lib2.SelectColumn "id"], Lib2.whereClause = Nothing} `shouldSatisfy` isRight
     it "executes select statement with an aggregate" $ do
-      Lib2.executeStatement SelectStatement {table = "employees", query = [SelectAggregate (Aggregate Min "id")], whereClause = Nothing} `shouldSatisfy` isRight
+      Lib2.executeStatement Lib2.SelectStatement {Lib2.table = "employees", Lib2.query = [Lib2.SelectAggregate (Lib2.Aggregate Min "id")], Lib2.whereClause = Nothing} `shouldSatisfy` isRight
     it "executes select statement with a where clause" $ do
-      Lib2.executeStatement SelectStatement {table = "employees", query = [SelectColumn "id"], whereClause = Just [(WhereCriterion (ColumnExpression "name") RelEQ (ValueExpression (StringValue "Ed")),Nothing)]} `shouldSatisfy` isRight
+      Lib2.executeStatement Lib2.SelectStatement {Lib2.table = "employees", Lib2.query = [Lib2.SelectColumn "id"], Lib2.whereClause = Just [(Lib2.WhereCriterion (Lib2.ColumnExpression "name") RelEQ (Lib2.ValueExpression (StringValue "Ed")),Nothing)]} `shouldSatisfy` isRight
   describe "Lib3.parseTable" $ do
     it "parses valid table" $ do
       Lib3.parseTable "tableName: Organization_Employees  \n\
@@ -274,6 +274,30 @@ main = hspec $ do
         [IntegerValue 2, StringValue "Just"],
         [IntegerValue 3, StringValue "Eric", StringValue "Doe"]])
         `shouldSatisfy` isLeft
+    it "parser handles SELECT columns with specified tables" $ do
+      Lib3.parseStatement "SELECT table1.id, table2.id FROM table1, table2;"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "id" (Just "table2")], Lib3.whereClause = Nothing})
+    it "parser handles SELECT aggregates with specified tables" $ do
+      Lib3.parseStatement "SELECT MIN(table1.id), SUM(table2.age) FROM table1, table2;"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectAggregate (Lib3.Aggregate Min "id") (Just "table1"),Lib3.SelectAggregate (Lib3.Aggregate Sum "age") (Just "table2")], Lib3.whereClause = Nothing})
+    it "parser handles SELECT NOW() system function" $ do
+      Lib3.parseStatement "SELECT NOW();"
+      `shouldBe` Right (Lib3.SystemFunctionStatement {Lib3.function = Now})
+    it "parser handles system function mixed with SELECT columns" $ do
+      Lib3.parseStatement "SELECT table1.id, table2.age, NOW() FROM table1, table2;"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "age" (Just "table2"),Lib3.SelectSystemFunction Now], Lib3.whereClause = Nothing})
+    it "parser handles system function mixed with SELECT aggregates" $ do
+      Lib3.parseStatement "SELECT NOW(), MIN(table1.id), SUM(table2.age), MIN(table3.name) FROM table1, table2, table3;"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2","table3"], Lib3.query = [Lib3.SelectSystemFunction Now,Lib3.SelectAggregate (Lib3.Aggregate Min "id") (Just "table1"),Lib3.SelectAggregate (Lib3.Aggregate Sum "age") (Just "table2"),Lib3.SelectAggregate (Lib3.Aggregate Min "name") (Just "table3")], Lib3.whereClause = Nothing})
+    it "parser handles unspecified tables" $ do
+      Lib3.parseStatement "SELECT id, age FROM table1, table2;"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" Nothing,Lib3.SelectColumn "age" Nothing], Lib3.whereClause = Nothing})
+    it "parser handles specified table names in WHERE clause" $ do
+      Lib3.parseStatement "SELECT table1.id, table2.age FROM table1, table2 WHERE table1.name=table2.name;"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "age" (Just "table2")], Lib3.whereClause = Just [(Lib3.WhereCriterion (Lib3.ColumnExpression "name" (Just "table1")) RelEQ (Lib3.ColumnExpression "name" (Just "table2")),Nothing)]})
+    it "parser handles specified and unspecified tables in WHERE clause" $ do
+      Lib3.parseStatement "SELECT table1.id, table2.age FROM table1, table2 WHERE identification=table2.name AND name != 'Jane';"
+      `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "age" (Just "table2")], Lib3.whereClause = Just [(Lib3.WhereCriterion (Lib3.ColumnExpression "identification" Nothing) RelEQ (Lib3.ColumnExpression "name" (Just "table2")),Just And),(Lib3.WhereCriterion (Lib3.ColumnExpression "name" Nothing) RelNE (Lib3.ValueExpression (StringValue "Jane")),Nothing)]})
     -- it "PLACEHOLDER TEST JUST FOR USAGE SHOWCASE" $ do
     --   db <- setupDB
     --   res <- runExecuteIO db $ Lib3.executeSql "my_sql"
