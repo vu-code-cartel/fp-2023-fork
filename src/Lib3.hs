@@ -43,7 +43,7 @@ import Lib2(
 type TableName = String
 type FileContent = String
 
-data Condition = Condition String RelationalOperator' Value
+data Condition = Condition String RelationalOperator Value
   deriving (Show, Eq)
 
 data ExecutionAlgebra next
@@ -55,22 +55,6 @@ data ExecutionAlgebra next
   deriving Functor
 
 type Execution = Free ExecutionAlgebra
-
-data ParsedStatementLib3
-  = InsertStatement {
-      tableNameInsert :: TableName,
-      columnsInsert :: Maybe [String],
-      valuesInsert :: [Value]
-    }
-  | UpdateStatement {
-      tableNameUpdate :: TableName,
-      updates :: [(String, Value)],
-      whereConditions :: Maybe [Condition]
-    }
-  deriving (Show, Eq)
-
-data RelationalOperator' = Equal | LessThan | GreaterThan | LessThanOrEqual | GreaterThanOrEqual | NotEqual
-  deriving (Show, Eq)
 
 data SerializedColumn = SerializedColumn {
     name :: String,
@@ -121,8 +105,16 @@ data ParsedStatement = SelectStatement {
     function :: SystemFunction
 } | ShowTableStatement {
     table :: TableName
-} | ShowTablesStatement { }
-    deriving (Show, Eq)
+} | ShowTablesStatement { 
+} | InsertStatement {
+      tableNameInsert :: TableName,
+      columnsInsert :: Maybe [String],
+      valuesInsert :: [Value]
+} | UpdateStatement {
+      tableNameUpdate :: TableName,
+      updates :: [(String, Value)],
+      whereConditions :: Maybe [Condition]
+} deriving (Show, Eq)
 
 loadTable :: TableName -> Execution (Either ErrorMessage (TableName, DataFrame))
 loadTable tableName = liftF $ LoadTable tableName id
@@ -198,177 +190,6 @@ loadTables tableNames = loadTables' tableNames []
             case result of
                 Left err -> return $ Left err
                 Right table -> loadTables' xs (acc ++ [table])
-
--- call this to get get tableName,[columnNames] [values] from "insert into tablename values('value1', value2,...)" statement, values will be converted by their Y.Values types
--- call this to get all data from update query
-parseStatementLib3 :: String -> Either ErrorMessage (TableName, Maybe [String], [Value], Maybe [Condition])
-parseStatementLib3 inp = case runParser parser (dropWhile isSpace inp) of
-    Left err1 -> Left err1
-    Right (rest, statement) -> case statement of
-        InsertStatement { tableNameInsert = tableName, columnsInsert = columns, valuesInsert = values} -> 
-          Right (tableName, columns, values, Nothing)
-        UpdateStatement { tableNameUpdate = tableName, updates = updatesList, whereConditions = conditions} ->
-          let (columns, values) = unzip updatesList in
-          Right (tableName, Just columns, values, conditions)
-  where
-    parser :: Parser ParsedStatementLib3
-    parser = parseInsertStatement <* parseEndOfStatement <|> parseUpdateStatement <* parseEndOfStatement
-
-parseInsertStatement :: Parser ParsedStatementLib3
-parseInsertStatement = do
-  _ <- parseKeyword "insert"
-  _ <- parseWhitespace
-  _ <- parseKeyword "into"
-  _ <- parseWhitespace
-  tableName <- parseWord
-  parseOptionalWhitespace
-  columns <- optional parseColumnNames
-  _ <- parseKeyword "values"
-  parseOptionalWhitespace
-  values <- parseValues'
-  case columns of
-    Nothing -> return $ InsertStatement tableName columns values
-    Just cols ->
-      if length cols == length values
-        then return $ InsertStatement tableName columns values
-        else Parser $ \_ -> Left "Column count does not match the number of values provided"
-
-parseColumnNames :: Parser [String]
-parseColumnNames = do
-  _ <- parseChar '('
-  names <- parseWord `sepBy` (parseChar ',' *> parseOptionalWhitespace)
-  _ <- parseChar ')'
-  _ <- parseWhitespace
-  return names
- 
-parseValues' :: Parser [Value]
-parseValues' = do
-  _ <- parseChar '('
-  values <- parseValue `sepBy` (parseChar ',' *> parseOptionalWhitespace)
-  _ <- parseChar ')'
-  return values
-
-parseValue' :: Parser Value
-parseValue' = do
-  parseOptionalWhitespace
-  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
-  parseOptionalWhitespace
-  return val
-
-parseOptionalWhitespace :: Parser ()
-parseOptionalWhitespace = many (parseWhitespace *> pure ()) *> pure ()
-
-parseNumericValue :: Parser Value
-parseNumericValue = (IntegerValue <$> parseInt)
-
-parseInt :: Parser Integer
-parseInt = do
-  digits <- some (parseSatisfy isDigit)
-  return (read digits)
-
-parseNullValue :: Parser Value
-parseNullValue = parseKeyword "null" >> return NullValue
-
-parseBoolValue :: Parser Value
-parseBoolValue = (parseKeyword "true" >> return (BoolValue True)) <|>
-                 (parseKeyword "false" >> return (BoolValue False))
-
-parseStringValue :: Parser Value
-parseStringValue = do
-  strValue <- parseStringWithQuotes 
-  return (StringValue strValue)
-
-parseStringWithQuotes :: Parser String
-parseStringWithQuotes = do
-  _ <- parseChar '\''
-  str <- some (parseSatisfy (/= '\''))
-  _ <- parseChar '\''
-  return str
-
-parseSatisfy :: (Char -> Bool) -> Parser Char
-parseSatisfy predicate = Parser $ \inp ->
-    case inp of
-        [] -> Left "Empty input"
-        (x:xs) -> if predicate x then Right (xs, x) else Left ("Unexpected character: " ++ [x])
-
-parseUpdateStatement :: Parser ParsedStatementLib3
-parseUpdateStatement = do
-  _ <- parseKeyword "update"
-  _ <- parseWhitespace
-  tableName <- parseWord
-  _ <- parseWhitespace
-  _ <- parseKeyword "set"
-  _ <- parseWhitespace
-  updatesList <- parseUpdates
-  hasWhere <- optional $ parseWhereClauseFlag
-  whereConditions <- if hasWhere == Just True
-                       then Just <$> parseWhereClause'
-                       else pure Nothing
-  case whereConditions of
-    Nothing -> return $ UpdateStatement tableName updatesList Nothing 
-    Just conditions ->
-      if null conditions
-        then Parser $ \_ -> Left "At least one condition is required in the where clause"
-        else return $ UpdateStatement tableName updatesList (Just conditions) 
-
-parseWhereClauseFlag :: Parser Bool
-parseWhereClauseFlag = do
-  parseOptionalWhitespace
-  flag <- choice [parseKeyword "where" >> pure True, pure False]
-  case flag of
-    Just b -> return b
-    Nothing -> return False
-
-parseCountWhitespace :: Parser Int
-parseCountWhitespace = length <$> many parseWhitespace
-
-parseUpdates :: Parser [(String, Value)]
-parseUpdates = do
-  updatesList <- parseUpdate `sepBy` (parseChar ',' *> parseOptionalWhitespace)
-  return updatesList
-
-parseUpdate :: Parser (String, Value)
-parseUpdate = do
-  columnName <- parseWord
-  parseOptionalWhitespace
-  _ <- parseChar '='
-  parseOptionalWhitespace
-  value <- parseValueAndQuoteFlag
-  return (columnName, value)
-
-parseValueAndQuoteFlag :: Parser (Value)
-parseValueAndQuoteFlag = do
-  parseOptionalWhitespace
-  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
-  parseOptionalWhitespace
-  return val
-
-parseWhereClause' :: Parser [Condition]
-parseWhereClause' = do
-  _ <- parseWhitespace
-  conditions <- parseConditions
-  return conditions
-
-parseConditions :: Parser [Condition]
-parseConditions = parseCondition `sepBy` (parseKeyword "and" *> parseOptionalWhitespace)
-
-parseCondition :: Parser Condition
-parseCondition = do
-  columnName <- parseWord
-  parseOptionalWhitespace
-  op <- parseRelationalOperator'
-  parseOptionalWhitespace
-  value <- parseValue'
-  return $ Condition columnName op value
-
-parseRelationalOperator' :: Parser RelationalOperator'
-parseRelationalOperator' =
-      (parseKeyword "=" >> pure Equal)
-  <|> (parseKeyword "!=" >> pure NotEqual)
-  <|> (parseKeyword "<=" >> pure LessThanOrEqual)
-  <|> (parseKeyword ">=" >> pure GreaterThanOrEqual)
-  <|> (parseKeyword "<" >> pure LessThan)
-  <|> (parseKeyword ">" >> pure GreaterThan)
 
 choice :: [Parser a] -> Parser (Maybe a)
 choice [] = pure Nothing
@@ -518,6 +339,8 @@ parseStatement inp = do
                 <|> parseShowTableStatement
                 <|> parseShowTablesStatement
                 <|> parseSelectAllStatement
+                <|> parseInsertStatement
+                <|> parseUpdateStatement
 
 -- statement by type parsing
 
@@ -566,7 +389,155 @@ parseSelectStatement = do
     whereClause <- optional parseWhereClause
     pure $ SelectStatement tableNames selectData whereClause
 
---where clause parsing
+parseInsertStatement :: Parser ParsedStatement
+parseInsertStatement = do
+  _ <- parseKeyword "insert"
+  _ <- parseWhitespace
+  _ <- parseKeyword "into"
+  _ <- parseWhitespace
+  tableName <- parseWord
+  parseOptionalWhitespace
+  columns <- optional parseColumnNames
+  _ <- parseKeyword "values"
+  parseOptionalWhitespace
+  values <- parseValues
+  case columns of
+    Nothing -> return $ InsertStatement tableName columns values
+    Just cols ->
+      if length cols == length values
+        then return $ InsertStatement tableName columns values
+        else Parser $ \_ -> Left "Column count does not match the number of values provided"
+
+parseUpdateStatement :: Parser ParsedStatement
+parseUpdateStatement = do
+  _ <- parseKeyword "update"
+  _ <- parseWhitespace
+  tableName <- parseWord
+  _ <- parseWhitespace
+  _ <- parseKeyword "set"
+  _ <- parseWhitespace
+  updatesList <- parseUpdates
+  hasWhere <- optional $ parseWhereClauseFlag
+  whereConditions <- if hasWhere == Just True
+                       then Just <$> parseWhereClause'
+                       else pure Nothing
+  case whereConditions of
+    Nothing -> return $ UpdateStatement tableName updatesList Nothing 
+    Just conditions ->
+      if null conditions
+        then Parser $ \_ -> Left "At least one condition is required in the where clause"
+        else return $ UpdateStatement tableName updatesList (Just conditions) 
+
+-- insert and update util parsing functions
+
+parseOptionalWhitespace :: Parser ()
+parseOptionalWhitespace = many (parseWhitespace *> pure ()) *> pure ()
+
+parseColumnNames :: Parser [String]
+parseColumnNames = do
+  _ <- parseChar '('
+  names <- parseWord `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  _ <- parseChar ')'
+  _ <- parseWhitespace
+  return names
+
+parseValues :: Parser [Value]
+parseValues = do
+  _ <- parseChar '('
+  values <- parseValue' `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  _ <- parseChar ')'
+  return values
+
+parseValue' :: Parser Value
+parseValue' = do
+  parseOptionalWhitespace
+  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
+  parseOptionalWhitespace
+  return val
+
+parseNumericValue :: Parser Value
+parseNumericValue = (IntegerValue <$> parseInt)
+
+parseInt :: Parser Integer
+parseInt = do
+  digits <- some (parseSatisfy isDigit)
+  return (read digits)
+
+parseNullValue :: Parser Value
+parseNullValue = parseKeyword "null" >> return NullValue
+
+parseBoolValue :: Parser Value
+parseBoolValue = (parseKeyword "true" >> return (BoolValue True)) <|>
+                 (parseKeyword "false" >> return (BoolValue False))
+
+parseStringValue :: Parser Value
+parseStringValue = do
+  strValue <- parseStringWithQuotes 
+  return (StringValue strValue)
+
+parseStringWithQuotes :: Parser String
+parseStringWithQuotes = do
+  _ <- parseChar '\''
+  str <- some (parseSatisfy (/= '\''))
+  _ <- parseChar '\''
+  return str
+
+parseSatisfy :: (Char -> Bool) -> Parser Char
+parseSatisfy predicate = Parser $ \inp ->
+    case inp of
+        [] -> Left "Empty input"
+        (x:xs) -> if predicate x then Right (xs, x) else Left ("Unexpected character: " ++ [x])
+
+parseUpdates :: Parser [(String, Value)]
+parseUpdates = do
+  updatesList <- parseUpdate `sepBy` (parseChar ',' *> parseOptionalWhitespace)
+  return updatesList
+
+parseUpdate :: Parser (String, Value)
+parseUpdate = do
+  columnName <- parseWord
+  parseOptionalWhitespace
+  _ <- parseChar '='
+  parseOptionalWhitespace
+  value <- parseValueAndQuoteFlag
+  return (columnName, value)
+
+parseValueAndQuoteFlag :: Parser (Value)
+parseValueAndQuoteFlag = do
+  parseOptionalWhitespace
+  val <- parseNumericValue <|> parseBoolValue <|> parseNullValue <|> parseStringValue
+  parseOptionalWhitespace
+  return val
+
+parseWhereClauseFlag :: Parser Bool
+parseWhereClauseFlag = do
+  parseOptionalWhitespace
+  flag <- choice [parseKeyword "where" >> pure True, pure False]
+  case flag of
+    Just b -> return b
+    Nothing -> return False
+
+--where clause parsing (for update)
+
+parseWhereClause' :: Parser [Condition]
+parseWhereClause' = do
+  _ <- parseWhitespace
+  conditions <- parseConditions
+  return conditions
+
+parseConditions :: Parser [Condition]
+parseConditions = parseCondition `sepBy` (parseKeyword "and" *> parseOptionalWhitespace)
+
+parseCondition :: Parser Condition
+parseCondition = do
+  columnName <- parseWord
+  parseOptionalWhitespace
+  op <- parseRelationalOperator
+  parseOptionalWhitespace
+  value <- parseValue'
+  return $ Condition columnName op value
+
+--where clause parsing (for select)
 
 parseWhereClause :: Parser WhereClause
 parseWhereClause = do
