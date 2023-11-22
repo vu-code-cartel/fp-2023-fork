@@ -16,6 +16,8 @@ import System.Console.Repline
     evalRepl,
   )
 import System.Console.Terminal.Size (Window, size, width)
+import System.Directory (listDirectory, doesFileExist)
+import System.FilePath (dropExtension, pathSeparator, takeExtension)
 
 type Repl a = HaskelineT IO a
 
@@ -63,16 +65,27 @@ runExecuteIO (Free step) = do
     runExecuteIO next
     where
         runStep :: Lib3.ExecutionAlgebra a -> IO a
-        runStep (Lib3.GetTime next) = 
-          getCurrentTime >>= return . next
-        runStep (Lib3.LoadFile tableName next) = 
-          readFile (getTableFilePath tableName) >>= return . next
-        runStep (Lib3.SaveFile tableName fileContent next) = 
-          writeFile (getTableFilePath tableName) fileContent >>= return . next
-        runStep (Lib3.ExecutePure sql next) = do
-          currentTime <- getCurrentTime
-          let result = Lib3.parseStatement sql >>= (\parsedStmt -> Lib3.executeStatement currentTime parsedStmt)
-          return $ next result
+        runStep (Lib3.GetTime next) = getCurrentTime >>= return . next
+        runStep (Lib3.LoadTable tableName next) = do
+            let filePath = getTableFilePath tableName
+            fileExists <- doesFileExist filePath
+            if fileExists then do
+                fileContent <- readFile filePath
+                return $ next $ Lib3.parseTable fileContent
+            else
+                return $ next $ Left $ "Table '" ++ tableName ++ "' does not exist."
+        runStep (Lib3.SaveTable table next) = do
+            case Lib3.serializeTable table of
+                Left err -> error err
+                Right serializedTable -> writeFile (getTableFilePath $ fst table) serializedTable >>= return . next
+        runStep (Lib3.GetTableNames next) = do
+            files <- listDirectory dbDirectory
+            let tableNames = foldl (\acc fileName -> if takeExtension fileName == dbFormat then dropExtension fileName : acc else acc) [] files
+            return $ next tableNames
 
+        dbDirectory :: String
+        dbDirectory = "db"
+        dbFormat :: String
+        dbFormat = ".yaml"
         getTableFilePath :: String -> String
-        getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"
+        getTableFilePath tableName = dbDirectory ++ [pathSeparator] ++ tableName ++ dbFormat
