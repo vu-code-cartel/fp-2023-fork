@@ -16,7 +16,7 @@ import System.Console.Repline
     evalRepl,
   )
 import System.Console.Terminal.Size (Window, size, width)
-import System.Directory (listDirectory)
+import System.Directory (listDirectory, doesFileExist)
 import System.FilePath (dropExtension, pathSeparator, takeExtension)
 
 type Repl a = HaskelineT IO a
@@ -67,9 +67,13 @@ runExecuteIO (Free step) = do
         runStep :: Lib3.ExecutionAlgebra a -> IO a
         runStep (Lib3.GetTime next) = getCurrentTime >>= return . next
         runStep (Lib3.LoadTable tableName next) = do
-            fileContent <- readFile (getTableFilePath tableName)
-            let parsedResult = Lib3.parseTable fileContent
-            return $ next parsedResult
+            let filePath = getTableFilePath tableName
+            fileExists <- doesFileExist filePath
+            if fileExists then do
+                fileContent <- readFile filePath
+                return $ next $ Lib3.parseTable fileContent
+            else
+                return $ next $ Left $ "Table '" ++ tableName ++ "' does not exist."
         runStep (Lib3.SaveTable table next) = do
             case Lib3.serializeTable table of
                 Left err -> error err

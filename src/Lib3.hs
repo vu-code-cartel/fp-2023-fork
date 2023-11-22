@@ -14,19 +14,16 @@ where
 import Control.Monad.Free (Free (..), liftF)
 import DataFrame (DataFrame (..), ColumnType (IntegerType, StringType, BoolType, DateTimeType), Column (..), Value (..), Row)
 import Data.Time ( UTCTime )
-import Control.Applicative ( many, some, Alternative(empty, (<|>)), optional )
-import Data.Foldable (traverse_)
+import Control.Applicative ( many, some, Alternative((<|>)), optional )
 import Data.List (find, findIndex)
 import Data.Maybe (mapMaybe, catMaybes, listToMaybe)
-import Data.Time.Clock (UTCTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Yaml as Y
 import GHC.Generics (Generic)
-import Data.Char (toLower)
+import Data.Char (toLower, isSpace, isDigit)
 import Lib1 (validateDataFrame)
-import Data.Char (toLower, isSpace, isAlphaNum, isDigit)
 import Lib2(
     Parser(..),
     RelationalOperator(..),
@@ -410,6 +407,7 @@ serializeTable (tableName, dataFrame) = do
         serializeDataType IntegerType = "integer"
         serializeDataType StringType = "string"
         serializeDataType BoolType = "bool"
+        serializeDataType DateTimeType = "datetime"
 
         serializeRows :: [Row] -> FileContent
         serializeRows [] = "rows: []\n"
@@ -427,6 +425,7 @@ serializeTable (tableName, dataFrame) = do
         valueToString (IntegerValue x) = show x
         valueToString (StringValue x) = x
         valueToString (BoolValue x) = show x
+        valueToString (DateTimeValue x) = x
         valueToString NullValue = "null"
 
 parseTable :: FileContent -> Either ErrorMessage (TableName, DataFrame)
@@ -501,6 +500,7 @@ parseTable content = do
         parseDataType dataType = case map toLower dataType of
             "integer" -> Right IntegerType
             "string" -> Right StringType
+            "datetime" -> Right DateTimeType
             "bool" -> Right BoolType
             _ -> Left $ "Unrecognized data type: " ++ dataType
 
