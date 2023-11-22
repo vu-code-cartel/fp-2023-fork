@@ -6,9 +6,8 @@ module Lib3
     Execution,
     ExecutionAlgebra(..),
     parseStatement,
-    loadAndParseTable,
-    loadFile,
-    parseTable
+    parseTable,
+    serializeTable
   )
 where
 
@@ -51,11 +50,9 @@ data Condition = Condition String RelationalOperator' Value
   deriving (Show, Eq)
 
 data ExecutionAlgebra next
-  = LoadFile TableName (FileContent -> next)
-  | SaveFile TableName FileContent (() -> next)
+  = LoadTable TableName (Either ErrorMessage (TableName, DataFrame) -> next)
+  | SaveTable (TableName, DataFrame) (() -> next)
   | GetTime (UTCTime -> next)
-  | LoadAndParseTable TableName (Either ErrorMessage (TableName, DataFrame) -> next)
-  | InsertData TableName [[Y.Value]] (() -> next)
   -- feel free to add more constructors here
   deriving Functor
 
@@ -130,11 +127,11 @@ data ParsedStatement = SelectStatement {
 } | ShowTablesStatement { }
     deriving (Show, Eq)
 
-loadFile :: TableName -> Execution FileContent
-loadFile name = liftF $ LoadFile name id
+loadTable :: TableName -> Execution (Either ErrorMessage (TableName, DataFrame))
+loadTable tableName = liftF $ LoadTable tableName id
 
-saveFile :: TableName -> FileContent -> Execution ()
-saveFile tableName fileContent = liftF $ SaveFile tableName fileContent id
+saveTable :: (TableName, DataFrame) -> Execution ()
+saveTable table = liftF $ SaveTable table id
 
 getTime :: Execution UTCTime
 getTime = liftF $ GetTime id
@@ -146,7 +143,7 @@ executeSql sql = case parseStatement sql of
         case validateSelectData query of
             Left errMsg -> return $ Left errMsg
             Right _ -> do
-                loadResult <- loadAndParseTables tableNames
+                loadResult <- loadTables tableNames
                 case loadResult of
                     Left errorMsg -> return $ Left errorMsg
                     Right tableData -> do
@@ -166,7 +163,7 @@ executeSql sql = case parseStatement sql of
                                             selectedDataFrame <- selectColumnsFromDataFrame filteredDataFrame updatedQuery
                                             return $ Right selectedDataFrame
     Right (SelectAllStatement tableNames maybeWhereClause) -> do
-        loadResult <- loadAndParseTables tableNames
+        loadResult <- loadTables tableNames
         case loadResult of
             Left errorMsg -> return $ Left errorMsg
             Right tableData -> do 
@@ -177,7 +174,7 @@ executeSql sql = case parseStatement sql of
                         let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
                         return $ Right filteredDataFrame
     Right (ShowTableStatement table) -> do
-        loadResult <- loadAndParseTable table
+        loadResult <- loadTable table
         case loadResult of 
             Left errorMsg -> return $ Left errorMsg
             Right (tableName, dataframe) -> return $ Right dataframe
@@ -188,23 +185,17 @@ executeSql sql = case parseStatement sql of
                 return $ Right nowDataFrame
     Right _ -> return $ Left "Unsupported SQL statement type"
 
-loadAndParseTable :: TableName -> Execution (Either ErrorMessage (TableName, DataFrame))
-loadAndParseTable tableName = liftF $ LoadAndParseTable tableName id
-
-loadAndParseTables :: [TableName] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
-loadAndParseTables [] = return $ Right []
-loadAndParseTables (tableName:rest) = do
-    result <- loadAndParseTable tableName
-    case result of
-        Left errorMsg -> return $ Left errorMsg
-        Right tableData -> do
-            restResults <- loadAndParseTables rest
-            return $ appendResult tableData restResults
-
-appendResult :: (TableName, DataFrame) -> Either ErrorMessage [(TableName, DataFrame)] -> Either ErrorMessage [(TableName, DataFrame)]
-appendResult tableData (Right results) = Right (tableData : results)
-appendResult _ (Left errorMsg) = Left errorMsg
-
+loadTables :: [TableName] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
+loadTables [] = return $ Right []
+loadTables tableNames = loadTables' tableNames []
+    where
+        loadTables' :: [TableName] -> [(TableName, DataFrame)] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
+        loadTables' [] acc = return $ Right acc
+        loadTables' (x:xs) acc = do
+            result <- loadTable x
+            case result of
+                Left err -> return $ Left err
+                Right table -> loadTables' xs (acc ++ [table])
 
 -- call this to get get tableName,[columnNames] [values] from "insert into tablename values('value1', value2,...)" statement, values will be converted by their Y.Values types
 -- call this to get all data from update query

@@ -63,16 +63,15 @@ runExecuteIO (Free step) = do
     runExecuteIO next
     where
         runStep :: Lib3.ExecutionAlgebra a -> IO a
-        runStep (Lib3.GetTime next) = 
-          getCurrentTime >>= return . next
-        runStep (Lib3.LoadFile tableName next) = 
-          readFile (getTableFilePath tableName) >>= return . next
-        runStep (Lib3.SaveFile tableName fileContent next) = 
-          writeFile (getTableFilePath tableName) fileContent >>= return . next
-        runStep (Lib3.LoadAndParseTable tableName next) = do
-          fileContent <- readFile (getTableFilePath tableName)
-          let parsedResult = Lib3.parseTable fileContent
-          return $ next parsedResult
+        runStep (Lib3.GetTime next) = getCurrentTime >>= return . next
+        runStep (Lib3.LoadTable tableName next) = do
+            fileContent <- readFile (getTableFilePath tableName)
+            let parsedResult = Lib3.parseTable fileContent
+            return $ next parsedResult
+        runStep (Lib3.SaveTable table next) = do
+            case Lib3.serializeTable table of
+                Left err -> error err
+                Right serializedTable -> writeFile (getTableFilePath $ fst table) serializedTable >>= return . next
 
         getTableFilePath :: String -> String
         getTableFilePath tableName = "db/" ++ tableName ++ ".yaml"
