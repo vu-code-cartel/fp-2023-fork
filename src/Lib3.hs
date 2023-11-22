@@ -6,15 +6,12 @@ module Lib3
     ParsedStatement(..),
     Execution,
     ExecutionAlgebra(..),
-    SelectQuery (..),
     SelectData (..),
     Aggregate (..),
     AggregateFunction (..),
     Expression (..),
     WhereClause (..),
     WhereCriterion (..),
-    LogicalOperator (..),
-    Value(..),
     SystemFunction (..),
     parseStatement,
     parseTable,
@@ -213,7 +210,7 @@ validateSelectDataTablesAndColumns tableData selectDataList = mapM_ validate sel
       maybe (Right ()) (`validateTableAndColumn` columnName) maybeTableName
     validate (SelectAggregate (Aggregate _ columnName) maybeTableName) = 
       maybe (Right ()) (`validateTableAndColumn` columnName) maybeTableName
-    validate _ = Right () -- Other cases are ignored for this validation
+    validate _ = Right () 
 
     validateTableAndColumn :: TableName -> ColumnName -> Either ErrorMessage ()
     validateTableAndColumn tableName columnName =
@@ -227,7 +224,7 @@ validateWhereClauseTablesAndColumns :: [(TableName, DataFrame)] -> Maybe WhereCl
 validateWhereClauseTablesAndColumns tableData maybeWhereClause = 
     case maybeWhereClause of
         Just whereClause -> validateWhereClause whereClause
-        Nothing -> Right ()  -- If there is no WhereClause, validation passes by default.
+        Nothing -> Right () 
 
   where
     validateWhereClause :: WhereClause -> Either ErrorMessage ()
