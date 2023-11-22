@@ -12,34 +12,34 @@ import Data.IORef
 
 type DBMock = [(String, IORef String)]
 
-setupDB :: IO DBMock
-setupDB = do
-  employeesRef <- newIORef "tableName: employees\n\
-                           \columns:\n\
-                           \- name: id\n\
-                           \  dataType: integer\n\
-                           \- name: name\n\
-                           \  dataType: string\n\
-                           \- name: surname\n\
-                           \  dataType: string\n\
-                           \rows:\n\
-                           \- [1, Vi, Po]\n\
-                           \- [2, Ed, Dl]\n"
-  return [("employees", employeesRef)]
+-- setupDB :: IO DBMock
+-- setupDB = do
+--   employeesRef <- newIORef "tableName: employees\n\
+--                            \columns:\n\
+--                            \- name: id\n\
+--                            \  dataType: integer\n\
+--                            \- name: name\n\
+--                            \  dataType: string\n\
+--                            \- name: surname\n\
+--                            \  dataType: string\n\
+--                            \rows:\n\
+--                            \- [1, Vi, Po]\n\
+--                            \- [2, Ed, Dl]\n"
+--   return [("employees", employeesRef)]
 
-runExecuteIO :: DBMock -> Lib3.Execution r -> IO (DBMock, r)
-runExecuteIO dbMock (Pure r) = return (dbMock, r)
-runExecuteIO dbMock (Free step) = do
-  next <- runStep step
-  runExecuteIO dbMock next
-  where
-    runStep :: Lib3.ExecutionAlgebra a -> IO a
-    runStep (Lib3.GetTime next) =
-      getCurrentTime >>= return . next
-    runStep (Lib3.LoadFile tableName next) = do
-      readIORef (getValueByKey dbMock tableName) >>= return . next
-    runStep (Lib3.SaveFile tableName fileContent next) = do
-      writeIORef (getValueByKey dbMock tableName) fileContent >>= return . next
+-- runExecuteIO :: DBMock -> Lib3.Execution r -> IO (DBMock, r)
+-- runExecuteIO dbMock (Pure r) = return (dbMock, r)
+-- runExecuteIO dbMock (Free step) = do
+--   next <- runStep step
+--   runExecuteIO dbMock next
+--   where
+--     runStep :: Lib3.ExecutionAlgebra a -> IO a
+--     runStep (Lib3.GetTime next) =
+--       getCurrentTime >>= return . next
+--     runStep (Lib3.LoadFile tableName next) = do
+--       readIORef (getValueByKey dbMock tableName) >>= return . next
+--     runStep (Lib3.SaveFile tableName fileContent next) = do
+--       writeIORef (getValueByKey dbMock tableName) fileContent >>= return . next
 
 getValueByKey :: Eq a => [(a, b)] -> a -> b
 getValueByKey [] _ = error "Key not found"
