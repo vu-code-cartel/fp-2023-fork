@@ -53,6 +53,7 @@ data ExecutionAlgebra next
   = LoadTable TableName (Either ErrorMessage (TableName, DataFrame) -> next)
   | SaveTable (TableName, DataFrame) (() -> next)
   | GetTime (UTCTime -> next)
+  | GetTableNames ([TableName] -> next)
   -- feel free to add more constructors here
   deriving Functor
 
@@ -90,7 +91,6 @@ instance Y.FromJSON SerializedTable
 
 type ErrorMessage = String
 type ColumnName = String
-
 
 data Expression
     = ValueExpression Value
@@ -135,6 +135,9 @@ saveTable table = liftF $ SaveTable table id
 
 getTime :: Execution UTCTime
 getTime = liftF $ GetTime id
+
+getTableNames :: Execution [TableName]
+getTableNames = liftF $ GetTableNames id
 
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case parseStatement sql of

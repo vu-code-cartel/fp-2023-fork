@@ -84,8 +84,8 @@ executables:
     - terminal-size
     - free
     - time
-    - yaml
-    - text
+    - filepath
+    - directory
 
 tests:
   fp2023-test:

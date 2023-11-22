@@ -73,9 +73,9 @@ executable fp2023-manipulate
     , free
     , repline
     , terminal-size
-    , text
     , time
-    , yaml
+    , filepath
+    , directory
   default-language: Haskell2010
 
 executable fp2023-select-all
