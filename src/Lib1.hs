@@ -143,6 +143,7 @@ validateDataFrame (DataFrame cols rows) = validateRows rows
         getColTypeByValue (IntegerValue _) = Right IntegerType
         getColTypeByValue (StringValue _) = Right StringType
         getColTypeByValue (BoolValue _) = Right BoolType
+        getColTypeByValue (DateTimeValue _) = Right DateTimeType
         getColTypeByValue _ = Left "Unknown column type."
 
         getColType :: Column -> ColumnType

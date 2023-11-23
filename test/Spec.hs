@@ -143,94 +143,99 @@ main = hspec $ do
       Lib2.executeStatement SelectStatement {table = "employees", query = [SelectColumn "id"], whereClause = Just [(WhereCriterion (ColumnExpression "name") RelEQ (ValueExpression (StringValue "Ed")),Nothing)]} `shouldSatisfy` isRight
   describe "Lib3.parseTable" $ do
     it "parses valid table" $ do
-      Lib3.parseTable "tableName: Organization_Employees  \n\
-                      \columns:                           \n\
-                      \- name: id                         \n\
-                      \  dataType: integer                \n\
-                      \- name: name                       \n\
-                      \  dataType: string                 \n\
-                      \- name: surname                    \n\
-                      \  dataType: StrInG                 \n\
-                      \- name: isFired                    \n\
-                      \  dataType: bool                   \n\
-                      \rows:                              \n\
-                      \- [1, Vi, Po, false]               \n\
-                      \- [2, Ed, Dl, NULL]                \n\
-                      \- [Null, <UNKNOWN>, null, TRUE]"
-                      `shouldBe` Right ("Organization_Employees", DataFrame
-                        [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType, Column "isFired" BoolType] [
-                        [IntegerValue 1, StringValue "Vi", StringValue "Po", BoolValue False],
-                        [IntegerValue 2, StringValue "Ed", StringValue "Dl", NullValue],
-                        [NullValue, StringValue "<UNKNOWN>", NullValue, BoolValue True]])
+      Lib3.parseTable "tableName: Organization_Employees\n\
+                      \columns:\n\
+                      \- name: id\n\
+                      \  dataType: integer\n\
+                      \- name: name\n\
+                      \  dataType: string\n\
+                      \- name: surname\n\
+                      \  dataType: StrInG\n\
+                      \- name: isFired\n\
+                      \  dataType: bool\n\
+                      \- name: startedAt\n\
+                      \  dataType: datetime\n\
+                      \rows:\n\
+                      \- [1, Vi, \"Po\", false, 2023-09-23 16:29:24]\n\
+                      \- [2, \"Ed\", Dl, NULL, 1993-09-23 12:00:00]\n\
+                      \- [123, \"Lorem ipsum\", \"d,o\\\\l:o;r_s()i\n$t%a^m@e't\\\".\", True, 2025-01-14 10:29:24]\n\
+                      \- [Null, \"<UNKNOWN>\", null, TRUE, 2023-02-14 10:29:24]"
+                      `shouldBe` Right ("Organization_Employees", DataFrame [
+                        Column "id" IntegerType, Column "name" StringType, Column "surname" StringType, Column "isFired" BoolType, Column "startedAt" DateTimeType] [
+                        [IntegerValue 1, StringValue "Vi", StringValue "Po", BoolValue False, DateTimeValue "2023-09-23 16:29:24"],
+                        [IntegerValue 2, StringValue "Ed", StringValue "Dl", NullValue, DateTimeValue "1993-09-23 12:00:00"],
+                        [IntegerValue 123, StringValue "Lorem ipsum", StringValue "d,o\\l:o;r_s()i $t%a^m@e't\".", BoolValue True, DateTimeValue "2025-01-14 10:29:24"],
+                        [NullValue, StringValue "<UNKNOWN>", NullValue, BoolValue True, DateTimeValue "2023-02-14 10:29:24"]])
     it "parses table with no rows" $ do
-      Lib3.parseTable "tableName: NoRows                  \n\
-                      \columns:                           \n\
-                      \- name: Id                         \n\
-                      \  dataType: integer                \n\
-                      \- name: Name                       \n\
-                      \  dataType: string                 \n\
+      Lib3.parseTable "tableName: NoRows\n\
+                      \columns:\n\
+                      \- name: Id\n\
+                      \  dataType: integer\n\
+                      \- name: Name\n\
+                      \  dataType: string\n\
                       \rows: []"
                       `shouldBe` Right ("NoRows", DataFrame [Column "Id" IntegerType, Column "Name" StringType] [])
     it "parses table with no columns" $ do
-      Lib3.parseTable "tableName: NoCols_123              \n\
-                      \columns: []                        \n\
+      Lib3.parseTable "tableName: NoCols_123\n\
+                      \columns: []\n\
                       \rows: []"
                       `shouldBe` Right ("NoCols_123", DataFrame [] [])
     it "handles unknown data type" $ do
-      Lib3.parseTable "tableName: NoRows                  \n\
-                      \columns:                           \n\
-                      \- name: Id                         \n\
-                      \  dataType: number                 \n\
+      Lib3.parseTable "tableName: NoRows\n\
+                      \columns:\n\
+                      \- name: Id\n\
+                      \  dataType: number\n\
                       \rows: []"
                       `shouldSatisfy` isLeft
     it "handles non-integer numbers" $ do
-      Lib3.parseTable "tableName: Decimals                \n\
-                      \columns:                           \n\
-                      \- name: Id                         \n\
-                      \  dataType: integer                \n\
-                      \rows:                              \n\
+      Lib3.parseTable "tableName: Decimals\n\
+                      \columns:\n\
+                      \- name: Id\n\
+                      \  dataType: integer\n\
+                      \rows:\n\
                       \- [1.1]"
                       `shouldSatisfy` isLeft
     it "handles data type mismatch" $ do
-      Lib3.parseTable "tableName: Mismatch                \n\
-                      \columns:                           \n\
-                      \- name: Id                         \n\
-                      \  dataType: integer                \n\
-                      \rows:                              \n\
+      Lib3.parseTable "tableName: Mismatch\n\
+                      \columns:\n\
+                      \- name: Id\n\
+                      \  dataType: integer\n\
+                      \rows:\n\
                       \- [test]"
                       `shouldSatisfy` isLeft
     it "handles missing value in row" $ do
-      Lib3.parseTable "tableName: Missing_Value           \n\
-                      \columns:                           \n\
-                      \- name: Id                         \n\
-                      \  dataType: integer                \n\
-                      \- name: Name                       \n\
-                      \  dataType: string                 \n\
-                      \rows:                              \n\
-                      \- [1, John]                        \n\
-                      \- [2]                              \n\
+      Lib3.parseTable "tableName: Missing_Value\n\
+                      \columns:\n\
+                      \- name: Id\n\
+                      \  dataType: integer\n\
+                      \- name: Name\n\
+                      \  dataType: string\n\
+                      \rows:\n\
+                      \- [1, John]\n\
+                      \- [2]\n\
                       \- [3, Eric]"
                       `shouldSatisfy` isLeft
     it "handles rows with too many values" $ do
-      Lib3.parseTable "tableName: Too_Many                \n\
-                      \columns:                           \n\
-                      \- name: Id                         \n\
-                      \  dataType: integer                \n\
-                      \- name: Name                       \n\
-                      \  dataType: string                 \n\
-                      \rows:                              \n\
-                      \- [1, John]                        \n\
-                      \- [2, Just]                        \n\
+      Lib3.parseTable "tableName: Too_Many\n\
+                      \columns:\n\
+                      \- name: Id\n\
+                      \  dataType: integer\n\
+                      \- name: Name\n\
+                      \  dataType: string\n\
+                      \rows:\n\
+                      \- [1, John]\n\
+                      \- [2, Just]\n\
                       \- [3, Eric, Doe]"
                       `shouldSatisfy` isLeft
   describe "Lib3.serializeTable" $ do
     it "serializes valid table" $ do
       Lib3.serializeTable ("Organization_Employees",
-        DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType, Column "isFired" BoolType] [
-                  [IntegerValue 1, StringValue "Vi", StringValue "Po", BoolValue False],
-                  [IntegerValue 2, StringValue "Ed", StringValue "Dl", NullValue],
-                  [NullValue, StringValue "<UNKNOWN>", NullValue, BoolValue True]])
-        `shouldBe` Right "tableName: Organization_Employees\n\
+        DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType, Column "isFired" BoolType, Column "startedAt" DateTimeType] [
+                  [IntegerValue 1, StringValue "Vi", StringValue "Po", BoolValue False, DateTimeValue "2023-09-23 16:29:24"],
+                  [IntegerValue 2, StringValue "Ed", StringValue "Dl", NullValue, DateTimeValue "1993-09-23 12:00:00"],
+                  [IntegerValue 123, StringValue "Lorem ipsum", StringValue "d,o\\l:o;r_s()i\n$t%a^m@e't\".", BoolValue True, DateTimeValue "2025-01-14 10:29:24"],
+                  [NullValue, StringValue "<UNKNOWN>", NullValue, BoolValue True, DateTimeValue "2023-02-14 10:29:24"]])
+        `shouldBe` Right "tableName: \"Organization_Employees\"\n\
                          \columns:\n\
                          \- name: id\n\
                          \  dataType: integer\n\
@@ -240,13 +245,16 @@ main = hspec $ do
                          \  dataType: string\n\
                          \- name: isFired\n\
                          \  dataType: bool\n\
+                         \- name: startedAt\n\
+                         \  dataType: datetime\n\
                          \rows:\n\
-                         \- [1, Vi, Po, False]\n\
-                         \- [2, Ed, Dl, null]\n\
-                         \- [null, <UNKNOWN>, null, True]\n"
+                         \- [1, \"Vi\", \"Po\", False, \"2023-09-23 16:29:24\"]\n\
+                         \- [2, \"Ed\", \"Dl\", null, \"1993-09-23 12:00:00\"]\n\
+                         \- [123, \"Lorem ipsum\", \"d,o\\l:o;r_s()i\n$t%a^m@e't\".\", True, \"2025-01-14 10:29:24\"]\n\
+                         \- [null, \"<UNKNOWN>\", null, True, \"2023-02-14 10:29:24\"]\n"
     it "serializes table with no rows" $ do
       Lib3.serializeTable ("NoRows", DataFrame [Column "Id" IntegerType, Column "Name" StringType] [])
-      `shouldBe` Right "tableName: NoRows\n\
+      `shouldBe` Right "tableName: \"NoRows\"\n\
                        \columns:\n\
                        \- name: Id\n\
                        \  dataType: integer\n\
@@ -255,7 +263,7 @@ main = hspec $ do
                        \rows: []\n"
     it "serializes table with no columns" $ do
       Lib3.serializeTable ("NoCols_123", DataFrame [] [])
-      `shouldBe` Right "tableName: NoCols_123\n\
+      `shouldBe` Right "tableName: \"NoCols_123\"\n\
                        \columns: []\n\
                        \rows: []\n"
     it "handles data type mismatch" $ do
