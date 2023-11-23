@@ -25,7 +25,7 @@ import Data.Time ( UTCTime )
 import Control.Applicative ( many, some, Alternative((<|>)), optional )
 import Data.List (find, findIndex)
 import Data.Maybe (mapMaybe, catMaybes, listToMaybe)
-import Data.Time.Format (formatTime, defaultTimeLocale)
+import Data.Time.Format (formatTime, defaultTimeLocale, parseTimeM)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.Yaml as Y
@@ -123,6 +123,9 @@ data ParsedStatement = SelectStatement {
       updates :: [(String, Value)],
       whereConditions :: Maybe [Condition]
 } deriving (Show, Eq)
+
+dateTimeFormat :: String
+dateTimeFormat = "%Y-%m-%d %H:%M:%S"
 
 loadTable :: TableName -> Execution (Either ErrorMessage (TableName, DataFrame))
 loadTable tableName = liftF $ LoadTable tableName id
@@ -263,7 +266,7 @@ serializeTable (tableName, dataFrame) = do
             serializeTableName tableName' ++ serializeCols cols ++ serializeRows rows
 
         serializeTableName :: TableName -> FileContent
-        serializeTableName tableName' = "tableName: " ++ tableName' ++ "\n"
+        serializeTableName tableName' = "tableName: " ++ escapeValue tableName' ++ "\n"
 
         serializeCols :: [Column] -> FileContent
         serializeCols [] = "columns: []\n"
@@ -302,10 +305,13 @@ serializeTable (tableName, dataFrame) = do
 
         valueToString :: Value -> String
         valueToString (IntegerValue x) = show x
-        valueToString (StringValue x) = x
+        valueToString (StringValue x) = escapeValue x
         valueToString (BoolValue x) = show x
-        valueToString (DateTimeValue x) = x
+        valueToString (DateTimeValue x) = escapeValue x
         valueToString NullValue = "null"
+
+        escapeValue :: String -> String
+        escapeValue x = "\"" ++ x ++ "\""
 
 parseTable :: FileContent -> Either ErrorMessage (TableName, DataFrame)
 parseTable content = do
@@ -354,10 +360,21 @@ parseTable content = do
                         Right $ IntegerValue $ fromIntegral (truncate val)
                     else
                         Left "Non-integer numbers are not supported."
-                Y.String val -> Right $ StringValue $ T.unpack val
+                Y.String val -> do
+                    let str = T.unpack val
+                    if isDateTime str then
+                        Right $ DateTimeValue str
+                    else
+                        Right $ StringValue str
                 Y.Bool val -> Right $ BoolValue val
                 Y.Null -> Right NullValue
                 _ -> Left $ "Data type of value (" ++ show value ++ ") is not supported."
+        
+        isDateTime :: String -> Bool
+        isDateTime str =
+            case parseTimeM True defaultTimeLocale dateTimeFormat str :: Maybe UTCTime of
+                Just _ -> True
+                Nothing -> False
 
         parseCols :: [SerializedColumn] -> Either ErrorMessage [Column]
         parseCols cols = parseCols' cols []
@@ -959,7 +976,7 @@ createNowDataFrame :: Execution DataFrame
 createNowDataFrame = do
     currentTime <- getTime
     let columns = [Column "NOW()" DateTimeType]
-    let rows = [[DateTimeValue $ formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S" currentTime]]
+    let rows = [[DateTimeValue $ formatTime defaultTimeLocale dateTimeFormat currentTime]]
     return $ DataFrame columns rows
 
 createShowTablesFrame :: Execution DataFrame
