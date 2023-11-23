@@ -3,8 +3,16 @@
 
 module Lib3
   ( executeSql,
+    ParsedStatement(..),
     Execution,
     ExecutionAlgebra(..),
+    SelectData (..),
+    Aggregate (..),
+    AggregateFunction (..),
+    Expression (..),
+    WhereClause (..),
+    WhereCriterion (..),
+    SystemFunction (..),
     parseStatement,
     parseTable,
     serializeTable
@@ -132,28 +140,31 @@ executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case parseStatement sql of
     Left errorMsg -> return $ Left errorMsg
     Right (SelectStatement tableNames query maybeWhereClause) -> do
-        case validateSelectData query of
-            Left errMsg -> return $ Left errMsg
-            Right _ -> do
-                loadResult <- loadTables tableNames
-                case loadResult of
-                    Left errorMsg -> return $ Left errorMsg
-                    Right tableData -> do
-                        case updateUnspecifiedTableNames tableData tableNames query of
-                            Left errMsg -> return $ Left errMsg
-                            Right updatedQuery -> 
+        loadResult <- loadTables tableNames
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                case updateUnspecifiedTableNames tableData tableNames query of
+                    Left errMsg -> return $ Left errMsg
+                    Right updatedQuery -> do
+                        case validateSelectDataTablesAndColumns tableData updatedQuery of
+                            Left validationError -> return $ Left validationError
+                            Right _ ->
                                 case updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause of
                                     Left errMsg -> return $ Left errMsg
-                                    Right updatedMaybeWhereClause -> do
-                                        let productDataFrame = cartesianProduct tableData
-                                        let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
-                                        
-                                        if any isAggregate updatedQuery then do
-                                            aggregateDataFrame <- calculateAggregatesFromDataFrame filteredDataFrame updatedQuery
-                                            return $ aggregateDataFrame
-                                        else do
-                                            selectedDataFrame <- selectColumnsFromDataFrame filteredDataFrame updatedQuery
-                                            return $ Right selectedDataFrame
+                                    Right updatedMaybeWhereClause -> 
+                                        case validateWhereClauseTablesAndColumns tableData updatedMaybeWhereClause of
+                                            Left errMsg -> return $ Left errMsg
+                                            Right _ -> do
+                                                let productDataFrame = cartesianProduct tableData
+                                                let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
+                                                
+                                                if any isAggregate updatedQuery then do
+                                                    aggregateDataFrame <- calculateAggregatesFromDataFrame filteredDataFrame updatedQuery
+                                                    return $ aggregateDataFrame
+                                                else do
+                                                    selectedDataFrame <- selectColumnsFromDataFrame filteredDataFrame updatedQuery
+                                                    return $ Right selectedDataFrame
     Right (SelectAllStatement tableNames maybeWhereClause) -> do
         loadResult <- loadTables tableNames
         case loadResult of
@@ -190,6 +201,53 @@ loadTables tableNames = loadTables' tableNames []
             case result of
                 Left err -> return $ Left err
                 Right table -> loadTables' xs (acc ++ [table])
+
+validateSelectDataTablesAndColumns :: [(TableName, DataFrame)] -> [SelectData] -> Either ErrorMessage ()
+validateSelectDataTablesAndColumns tableData selectDataList = mapM_ validate selectDataList
+  where
+    validate :: SelectData -> Either ErrorMessage ()
+    validate (SelectColumn columnName maybeTableName) = 
+      maybe (Right ()) (`validateTableAndColumn` columnName) maybeTableName
+    validate (SelectAggregate (Aggregate _ columnName) maybeTableName) = 
+      maybe (Right ()) (`validateTableAndColumn` columnName) maybeTableName
+    validate _ = Right () 
+
+    validateTableAndColumn :: TableName -> ColumnName -> Either ErrorMessage ()
+    validateTableAndColumn tableName columnName =
+      case lookup tableName tableData of
+        Just df -> if columnExistsInDataFrame columnName df
+                     then Right ()
+                     else Left $ "Column " ++ columnName ++ " does not exist in table " ++ tableName
+        Nothing -> Left $ "Table " ++ tableName ++ " does not exist in statement"
+
+validateWhereClauseTablesAndColumns :: [(TableName, DataFrame)] -> Maybe WhereClause -> Either ErrorMessage ()
+validateWhereClauseTablesAndColumns tableData maybeWhereClause = 
+    case maybeWhereClause of
+        Just whereClause -> validateWhereClause whereClause
+        Nothing -> Right () 
+
+  where
+    validateWhereClause :: WhereClause -> Either ErrorMessage ()
+    validateWhereClause whereClause = mapM_ validateWhereCriterion whereClause
+
+    validateWhereCriterion :: (WhereCriterion, Maybe LogicalOperator) -> Either ErrorMessage ()
+    validateWhereCriterion (WhereCriterion leftExpr op rightExpr, _) = do
+        validateExpression leftExpr
+        validateExpression rightExpr
+
+    validateExpression :: Expression -> Either ErrorMessage ()
+    validateExpression (ColumnExpression columnName maybeTableName) =
+        case maybeTableName of
+            Just tableName -> 
+                case findColumnTable columnName tableData of
+                    Just _ -> Right ()
+                    Nothing -> Left $ "Column " ++ columnName ++ " does not exist in table " ++ tableName
+            Nothing -> Left $ "Table not specified for column " ++ columnName
+    validateExpression _ = Right ()  -- Other expressions pass validation by default.
+
+    findColumnTable :: ColumnName -> [(TableName, DataFrame)] -> Maybe TableName
+    findColumnTable columnName = fmap fst . find (\(_, df) -> columnExistsInDataFrame columnName df)
+
 
 choice :: [Parser a] -> Parser (Maybe a)
 choice [] = pure Nothing
