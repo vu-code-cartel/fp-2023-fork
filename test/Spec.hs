@@ -12,34 +12,74 @@ import Data.IORef
 
 type DBMock = [(String, IORef String)]
 
--- setupDB :: IO DBMock
--- setupDB = do
---   employeesRef <- newIORef "tableName: employees\n\
---                            \columns:\n\
---                            \- name: id\n\
---                            \  dataType: integer\n\
---                            \- name: name\n\
---                            \  dataType: string\n\
---                            \- name: surname\n\
---                            \  dataType: string\n\
---                            \rows:\n\
---                            \- [1, Vi, Po]\n\
---                            \- [2, Ed, Dl]\n"
---   return [("employees", employeesRef)]
+setupDB :: IO DBMock
+setupDB = do
+  employeesRef <- newIORef "tableName: employees\n\
+                           \columns:\n\
+                           \- name: id\n\
+                           \  dataType: integer\n\
+                           \- name: name\n\
+                           \  dataType: string\n\
+                           \- name: surname\n\
+                           \  dataType: string\n\
+                           \rows:\n\
+                           \- [1, Vi, Po]\n\
+                           \- [2, Ed, Dl]\n"
+  peopleRef <- newIORef "tableName: people\n\
+                           \columns:\n\
+                           \- name: id\n\
+                           \  dataType: integer\n\
+                           \- name: name\n\
+                           \  dataType: string\n\
+                           \- name: surname\n\
+                           \  dataType: string\n\
+                           \rows:\n\
+                           \- [1, Vi, Po]\n\
+                           \- [2, Ja, Ne]\n\
+                           \- [3, Jo, Nas]\n\
+                           \- [4, Jo, Po]\n\
+                           \- [5, Ed, Dl]\n"
+  animalsRef <- newIORef "tableName: animals\n\
+                           \columns:\n\
+                           \- name: id\n\
+                           \  dataType: integer\n\
+                           \- name: animal\n\
+                           \  dataType: string\n\
+                           \- name: masterName\n\
+                           \  dataType: string\n\
+                           \- name: masterSurname\n\
+                           \  dataType: string\n\
+                           \rows:\n\
+                           \- [1, Cat, Ja, Ne]\n\
+                           \- [2, Dog, Jo, Nas]\n"
+  return [("employees", employeesRef),("people", peopleRef),("animals", animalsRef)]
 
--- runExecuteIO :: DBMock -> Lib3.Execution r -> IO (DBMock, r)
--- runExecuteIO dbMock (Pure r) = return (dbMock, r)
--- runExecuteIO dbMock (Free step) = do
---   next <- runStep step
---   runExecuteIO dbMock next
---   where
---     runStep :: Lib3.ExecutionAlgebra a -> IO a
---     runStep (Lib3.GetTime next) =
---       getCurrentTime >>= return . next
---     runStep (Lib3.LoadFile tableName next) = do
---       readIORef (getValueByKey dbMock tableName) >>= return . next
---     runStep (Lib3.SaveFile tableName fileContent next) = do
---       writeIORef (getValueByKey dbMock tableName) fileContent >>= return . next
+runExecuteIO :: DBMock -> Lib3.Execution r -> IO r
+runExecuteIO dbMock (Pure r) = return r
+runExecuteIO dbMock (Free step) = do
+    (newDbMock, next) <- runStep dbMock step
+    runExecuteIO newDbMock next
+  where
+    runStep :: DBMock -> Lib3.ExecutionAlgebra a -> IO (DBMock, a)
+    runStep db (Lib3.GetTime next) = 
+        getCurrentTime >>= \time -> return (db, next time)
+
+    runStep db (Lib3.LoadTable tableName next) =
+        case lookup tableName db of
+            Just ref -> readIORef ref >>= \content -> return (db, next $ Lib3.parseTable content)
+            Nothing -> return (db, next $ Left $ "Table '" ++ tableName ++ "' does not exist.")
+
+    runStep db (Lib3.SaveTable (tableName, tableContent) next) =
+        case lookup tableName db of
+            Just ref -> case Lib3.serializeTable (tableName, tableContent) of
+                Left err -> error err  
+                Right serializedTable -> do
+                    writeIORef ref serializedTable
+                    return (db, next())
+            Nothing -> return (db, next())  
+
+    runStep db (Lib3.GetTableNames next) = 
+        return (db, next $ map fst db)
 
 getValueByKey :: Eq a => [(a, b)] -> a -> b
 getValueByKey [] _ = error "Key not found"
@@ -298,7 +338,28 @@ main = hspec $ do
     it "parser handles specified and unspecified tables in WHERE clause" $ do
       Lib3.parseStatement "SELECT table1.id, table2.age FROM table1, table2 WHERE identification=table2.name AND name != 'Jane';"
       `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "age" (Just "table2")], Lib3.whereClause = Just [(Lib3.WhereCriterion (Lib3.ColumnExpression "identification" Nothing) RelEQ (Lib3.ColumnExpression "name" (Just "table2")),Just And),(Lib3.WhereCriterion (Lib3.ColumnExpression "name" Nothing) RelNE (Lib3.ValueExpression (StringValue "Jane")),Nothing)]})
-    -- it "PLACEHOLDER TEST JUST FOR USAGE SHOWCASE" $ do
-    --   db <- setupDB
-    --   res <- runExecuteIO db $ Lib3.executeSql "my_sql"
-    --   updatedDb <- readIORef $ getValueByKey (fst res) "employees"
+    it "basic select to check io " $ do
+      db <- setupDB
+      res <- runExecuteIO db $ Lib3.executeSql "SELECT id FROM employees;"
+      res `shouldBe` Right (DataFrame [Column "employees.id" IntegerType] [[IntegerValue 1],[IntegerValue 2]])
+    it "SELECT without WHERE clause to show cartesian product is used" $ do
+      db <- setupDB
+      res <- runExecuteIO db $ Lib3.executeSql "SELECT id, name, surname FROM employees, employees;"
+      res `shouldBe` Right (DataFrame [Column "employees.id" IntegerType,Column "employees.name" StringType,Column "employees.surname" StringType,Column "employees.id" IntegerType,Column "employees.name" StringType,Column "employees.surname" StringType] [[IntegerValue 1,StringValue "Vi",StringValue "Po"],[IntegerValue 1,StringValue "Vi",StringValue "Po"],[IntegerValue 2,StringValue "Ed",StringValue "Dl"],[IntegerValue 2,StringValue "Ed",StringValue "Dl"]])
+    it "SELECT for multiple tables with matching rows from where clause" $ do
+      db <- setupDB
+      res <- runExecuteIO db $ Lib3.executeSql "SELECT id, name, surname FROM employees, people WHERE employees.name=people.name AND employees.surname=people.surname;"
+      res `shouldBe` Right (DataFrame [Column "employees.id" IntegerType,Column "employees.name" StringType,Column "employees.surname" StringType] [[IntegerValue 1,StringValue "Vi",StringValue "Po"],[IntegerValue 2,StringValue "Ed",StringValue "Dl"]])
+    it "SELECT from table that does not exist" $ do
+      db <- setupDB
+      res <- runExecuteIO db $ Lib3.executeSql "SELECT id FROM table;"
+      res `shouldBe` Left "Table 'table' does not exist."
+    it "SELECT handles unspecified table names from multiple tables" $ do
+      db <- setupDB
+      res <- runExecuteIO db $ Lib3.executeSql "SELECT name, surname, animal FROM people, animals WHERE name=masterName AND surname=masterSurname;"
+      res `shouldBe` Right (DataFrame [Column "people.name" StringType,Column "people.surname" StringType,Column "animals.animal" StringType] [[StringValue "Ja",StringValue "Ne",StringValue "Cat"],[StringValue "Jo",StringValue "Nas",StringValue "Dog"]])
+    it "SELECT handles aggregates from multiple tables" $ do
+      db <- setupDB
+      res <- runExecuteIO db $ Lib3.executeSql "SELECT SUM(people.id), MIN(masterName) FROM people, animals ;"
+      res `shouldBe` Right (DataFrame [Column "Sum(people.id)" IntegerType,Column "Min(animals.masterName)" StringType] [[IntegerValue 30,StringValue "Ja"]])
+    
