@@ -202,6 +202,91 @@ executeSql sql = case parseStatement sql of
                 if isJust maybeColumns
                     then insertWithColumns tableData maybeColumns values
                     else insertWithoutColumns tableData values
+    Right (UpdateStatement tableName updates whereConditions) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust whereConditions
+                    then updateWithWhere tableData updates whereConditions
+                    else updateWithoutWhere tableData updates
+
+-- update functions
+
+updateWithWhere :: (TableName, DataFrame) -> [(ColumnName, Value)] -> Maybe [Condition] -> Execution (Either ErrorMessage DataFrame)
+updateWithWhere (tableName, originalDataFrame) updates (Just whereConditions) = do
+        let filteredDataFrame = filterDataFrameByConditions originalDataFrame whereConditions
+        case updateFilteredRows filteredDataFrame updates of
+            Left errMsg -> return $ Left errMsg
+            Right updatedRows -> do
+                let combinedDataFrame = updateOriginalDataFrame originalDataFrame updatedRows
+                saveTable (tableName, combinedDataFrame)
+                return $ Right combinedDataFrame
+
+filterDataFrameByConditions :: DataFrame -> [Condition] -> DataFrame
+filterDataFrameByConditions (DataFrame columns rows) conditions =
+    let filteredRows = filter (satisfiesConditions conditions columns) rows
+    in DataFrame columns filteredRows
+
+satisfiesConditions :: [Condition] -> [Column] -> Row -> Bool
+satisfiesConditions conditions columns row = all (evalCondition row columns) conditions
+
+evalCondition :: Row -> [Column] -> Condition -> Bool
+evalCondition row columns (Condition columnName op rightValue) =
+    case findColumnIndex columnName columns of
+        Left _ -> False
+        Right colIndex -> let leftValue = row !! colIndex in
+            case op of
+                RelEQ -> leftValue == rightValue
+                RelNE -> leftValue /= rightValue
+                RelLT -> leftValue < rightValue
+                RelGT -> leftValue > rightValue
+                RelLE -> leftValue <= rightValue
+                RelGE -> leftValue >= rightValue 
+
+updateFilteredRows :: DataFrame -> [(ColumnName, Value)] -> Either ErrorMessage [(Row, Row)]
+updateFilteredRows (DataFrame columns rows) updates =
+    let updateRow' row = (row, updateRow row updates columns)
+        updatedRows = map updateRow' rows
+    in Right updatedRows
+
+updateOriginalDataFrame :: DataFrame -> [(Row, Row)] -> DataFrame
+updateOriginalDataFrame (DataFrame columns oldRows) updatedRowTuples =
+    let updatedRows = map snd updatedRowTuples
+        unchangedRows = filter (\oldRow -> notElem oldRow (map fst updatedRowTuples)) oldRows
+        newRows = unchangedRows ++ updatedRows
+    in DataFrame columns newRows
+
+updateWithoutWhere :: (TableName, DataFrame) -> [(ColumnName, Value)] -> Execution (Either ErrorMessage DataFrame)
+updateWithoutWhere (tableName, dataFrame) updates = do
+    case updateAllRows dataFrame updates of
+        Left errMsg -> return $ Left errMsg
+        Right updatedDataFrame -> do
+            saveTable (tableName, updatedDataFrame)
+            return $ Right updatedDataFrame
+
+updateAllRows :: DataFrame -> [(ColumnName, Value)] -> Either ErrorMessage DataFrame
+updateAllRows (DataFrame columns rows) updates =
+    let updatedRows = map (\row -> updateRow row updates columns) rows
+    in Right (DataFrame columns updatedRows)
+
+updateRow :: Row -> [(ColumnName, Value)] -> [Column]-> Row
+updateRow row updates columns =
+    foldl (\acc (colName, value) -> updateValue colName value acc columns) row updates
+
+updateValue :: ColumnName -> Value -> Row -> [Column] -> Row
+updateValue colName newValue row columns =
+    case findColumnIndex colName columns of
+        Left _ -> row -- Column not found, do nothing
+        Right colIndex -> replaceAtIndex colIndex newValue row
+
+replaceAtIndex :: Int -> a -> [a] -> [a]
+replaceAtIndex _ _ [] = []
+replaceAtIndex i newVal (x:xs)
+    | i == 0    = newVal : xs
+    | otherwise = x : replaceAtIndex (i - 1) newVal xs
+
+-- insert functions
 
 insertWithColumns :: (TableName, DataFrame) -> Maybe [ColumnName] -> [Value] -> Execution (Either ErrorMessage DataFrame)
 insertWithColumns (tableName, loadedDataFrame) justColumns values = do
@@ -239,6 +324,8 @@ insertRowIntoDataFrame :: DataFrame -> [Value] -> DataFrame
 insertRowIntoDataFrame (DataFrame columns rows) newValues =
     let updatedRows = rows ++ [newValues] in
         DataFrame columns updatedRows
+
+-- end of insert functions
 
 loadTables :: [TableName] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
 loadTables [] = return $ Right []
