@@ -117,13 +117,16 @@ data ParsedStatement = SelectStatement {
     table :: TableName
 } | ShowTablesStatement { 
 } | InsertStatement {
-      tableNameInsert :: TableName,
-      columnsInsert :: Maybe [String],
-      valuesInsert :: [Value]
+    tableNameInsert :: TableName,
+    columnsInsert :: Maybe [String],
+    valuesInsert :: [Value]
 } | UpdateStatement {
-      tableNameUpdate :: TableName,
-      updates :: [(String, Value)],
-      whereConditions :: Maybe [Condition]
+    tableNameUpdate :: TableName,
+    updates :: [(String, Value)],
+    whereConditions :: Maybe [Condition]
+} | DeleteStatement {
+    tableNameDelete :: TableName,
+    whereConditions :: Maybe [Condition]
 } deriving (Show, Eq)
 
 dateTimeFormat :: String
@@ -549,6 +552,7 @@ parseStatement inp = do
                 <|> parseSelectAllStatement
                 <|> parseInsertStatement
                 <|> parseUpdateStatement
+                <|> parseDeleteStatement
 
 -- statement by type parsing
 
@@ -635,6 +639,24 @@ parseUpdateStatement = do
       if null conditions
         then Parser $ \_ -> Left "At least one condition is required in the where clause"
         else return $ UpdateStatement tableName updatesList (Just conditions) 
+
+parseDeleteStatement :: Parser ParsedStatement
+parseDeleteStatement = do
+    _ <- parseKeyword "delete"
+    _ <- parseWhitespace
+    _ <- parseKeyword "from"
+    _ <- parseWhitespace
+    tableName <- parseWord
+    hasWhere <- optional $ parseWhereClauseFlag
+    whereConditions <- if hasWhere == Just True
+                        then Just <$> parseWhereClause'
+                        else pure Nothing
+    case whereConditions of
+        Nothing -> return $ DeleteStatement tableName Nothing 
+        Just conditions ->
+            if null conditions
+                then Parser $ \_ -> Left "At least one condition is required in the where clause"
+                else return $ DeleteStatement tableName (Just conditions)
 
 -- insert and update util parsing functions
 
