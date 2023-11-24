@@ -213,6 +213,41 @@ executeSql sql = case parseStatement sql of
                 if isJust whereConditions
                     then updateWithWhere tableData updates whereConditions
                     else updateWithoutWhere tableData updates
+    Right (DeleteStatement tableName whereConditions) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust whereConditions
+                    then deleteWithWhere tableData whereConditions
+                    else deleteWithoutWhere tableData
+-- delete functions
+
+deleteWithoutWhere :: (TableName, DataFrame) -> Execution (Either ErrorMessage DataFrame)
+deleteWithoutWhere (tableName, originalDataFrame) = do
+    let deletedDataFrame = deleteAllRows originalDataFrame
+    saveTable (tableName, deletedDataFrame)
+    return $ Right deletedDataFrame
+
+deleteAllRows :: DataFrame -> DataFrame
+deleteAllRows (DataFrame columns _) = DataFrame columns []
+
+deleteWithWhere :: (TableName, DataFrame) -> Maybe [Condition] -> Execution (Either ErrorMessage DataFrame)
+deleteWithWhere (tableName, originalDataFrame) (Just whereConditions) = do
+    let filteredDataFrame = filterDataFrameByConditions originalDataFrame whereConditions
+    case deleteFilteredRows originalDataFrame filteredDataFrame of
+        Left errMsg -> return $ Left errMsg
+        Right finalDataFrame -> do
+            saveTable (tableName, finalDataFrame)
+            return $ Right finalDataFrame
+
+deleteFilteredRows :: DataFrame -> DataFrame -> Either ErrorMessage DataFrame
+deleteFilteredRows _ (DataFrame _ []) = Left "There are no rows that fit the where conditions"
+deleteFilteredRows (DataFrame columns originalRows) (DataFrame _ filteredRows) =
+    let newRows = filter (\row -> row `notElem` filteredRows) originalRows
+    in if null newRows
+        then Left "Error deleting rows. No rows matching where clause"
+        else Right (DataFrame columns newRows)
 
 -- update functions
 
