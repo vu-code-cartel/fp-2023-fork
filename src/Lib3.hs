@@ -1039,10 +1039,23 @@ selectColumnsFromDataFrame :: DataFrame -> [SelectData] -> Execution DataFrame
 selectColumnsFromDataFrame (DataFrame allColumns rows) selectData = do
     currentTime <- getTime
     let systemFunctionColumns = mapMaybe (systemFunctionToColumn currentTime) selectData
-    let selectedColumnNames = [getFullColumnName colName maybeTableName | SelectColumn colName maybeTableName <- selectData]
-    let selectedColumns = filter (\(Column colName _) -> colName `elem` selectedColumnNames) allColumns ++ systemFunctionColumns
-    let selectedRows = map (\row -> selectRowColumns selectedColumnNames allColumns row ++ selectSystemFunctionValues systemFunctionColumns currentTime) rows
+
+    -- Create selectedColumns based on selectData, allowing duplicates
+    let selectedColumns = concatMap (selectColumnsByName allColumns) selectData ++ systemFunctionColumns
+
+    let selectedRows = map (\row -> selectRowColumns (map columnName selectedColumns) allColumns row ++ selectSystemFunctionValues systemFunctionColumns currentTime) rows
     return $ DataFrame selectedColumns selectedRows
+
+  where
+    selectColumnsByName :: [Column] -> SelectData -> [Column]
+    selectColumnsByName allCols (SelectColumn colName maybeTableName) =
+        case find (\(Column name _) -> name == getFullColumnName colName maybeTableName) allCols of
+            Just col -> [col]
+            Nothing -> []
+    selectColumnsByName _ _ = []
+
+    columnName :: Column -> ColumnName
+    columnName (Column name _) = name
 
 systemFunctionToColumn :: UTCTime -> SelectData -> Maybe Column
 systemFunctionToColumn currentTime (SelectSystemFunction Now) = Just $ Column "NOW()" DateTimeType
