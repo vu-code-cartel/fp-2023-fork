@@ -202,9 +202,9 @@ executeSql sql = case parseStatement sql of
         case loadResult of
             Left errorMsg -> return $ Left errorMsg
             Right tableData -> do
-                if isJust maybeColumns
-                    then insertWithColumns tableData maybeColumns values
-                    else insertWithoutColumns tableData values
+                case maybeColumns of
+                    Just justColumns -> insertWithColumns tableData justColumns values
+                    Nothing -> insertWithoutColumns tableData values
     Right (UpdateStatement tableName updates whereConditions) -> do
         loadResult <- loadTable tableName
         case loadResult of
@@ -221,6 +221,7 @@ executeSql sql = case parseStatement sql of
                 if isJust whereConditions
                     then deleteWithWhere tableData whereConditions
                     else deleteWithoutWhere tableData
+
 -- delete functions
 
 deleteWithoutWhere :: (TableName, DataFrame) -> Execution (Either ErrorMessage DataFrame)
@@ -326,7 +327,7 @@ replaceAtIndex i newVal (x:xs)
 
 -- insert functions
 
-insertWithColumns :: (TableName, DataFrame) -> Maybe [ColumnName] -> [Value] -> Execution (Either ErrorMessage DataFrame)
+insertWithColumns :: (TableName, DataFrame) -> [ColumnName] -> [Value] -> Execution (Either ErrorMessage DataFrame)
 insertWithColumns (tableName, loadedDataFrame) justColumns values = do
     case insertByColumnsIntoDataFrame loadedDataFrame justColumns values of
         Left errMsg -> return $ Left errMsg
@@ -334,10 +335,9 @@ insertWithColumns (tableName, loadedDataFrame) justColumns values = do
             saveTable (tableName, updatedDataFrame)
             return $ Right updatedDataFrame
 
-insertByColumnsIntoDataFrame :: DataFrame -> Maybe [ColumnName] -> [Value] -> Either ErrorMessage DataFrame
-insertByColumnsIntoDataFrame (DataFrame columns rows) maybeColumns newValues =
-    let changedColumns = fromMaybe [] maybeColumns
-        newRow = map (\col -> case elemIndex col changedColumns of
+insertByColumnsIntoDataFrame :: DataFrame -> [ColumnName] -> [Value] -> Either ErrorMessage DataFrame
+insertByColumnsIntoDataFrame (DataFrame columns rows) changedColumns newValues =
+    let newRow = map (\col -> case elemIndex col changedColumns of
                                   Just index -> newValues !! index
                                   Nothing -> NullValue) [col | Column col _ <- columns]
     in Right $ DataFrame columns (rows ++ [newRow])
