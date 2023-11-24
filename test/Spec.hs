@@ -9,6 +9,7 @@ import DataFrame
 import Control.Monad.Free (Free (..))
 import Data.Time ( UTCTime, getCurrentTime )
 import Data.IORef
+import Lib2 (Value(NullValue))
 
 type DBMock = [(String, IORef String)]
 
@@ -454,3 +455,27 @@ main = hspec $ do
     it "handles update statement without value for the column keyword" $ do
       let input = "UPDATE myTable SET column1 =  WHERE column2 = 'condition';"
       Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "inserts data without specifying columns" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "INSERT INTO employees values(3,'name','surname');"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 1, StringValue "Vi", StringValue "Po"], [IntegerValue 2, StringValue "Ed", StringValue "Dl"], [IntegerValue 3, StringValue "name", StringValue "surname"]])
+    it "inserts data into specified columns" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "INSERT INTO employees(name) values('name');"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 1, StringValue "Vi", StringValue "Po"], [IntegerValue 2, StringValue "Ed", StringValue "Dl"], [NullValue, StringValue "name", NullValue]])
+    it "updates data without a where clause" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "UPDATE employees SET id=0;"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 0, StringValue "Vi", StringValue "Po"], [IntegerValue 0, StringValue "Ed", StringValue "Dl"]])
+    it "updates data with a where clause" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "UPDATE employees SET name='new' where id=1;"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 2, StringValue "Ed", StringValue "Dl"], [IntegerValue 1, StringValue "new", StringValue "Po"]])
+    it "deletes all rows if there is no where clause" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "DELETE FROM employees;"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [])
+    it "deletes data with a where clause" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "DELETE FROM employees where name='Vi'"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 2, StringValue "Ed", StringValue "Dl"]])

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Lib3
   ( executeSql,
@@ -24,8 +25,8 @@ import Control.Monad.Free (Free (..), liftF)
 import DataFrame (DataFrame (..), ColumnType (IntegerType, StringType, BoolType, DateTimeType), Column (..), Value (..), Row)
 import Data.Time ( UTCTime )
 import Control.Applicative ( many, some, Alternative((<|>)), optional )
-import Data.List (find, findIndex)
-import Data.Maybe (mapMaybe, catMaybes, listToMaybe)
+import Data.List (find, findIndex, elemIndex)
+import Data.Maybe (mapMaybe, catMaybes, listToMaybe, isJust, fromMaybe)
 import Data.Time.Format (formatTime, defaultTimeLocale, parseTimeM)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -116,13 +117,16 @@ data ParsedStatement = SelectStatement {
     table :: TableName
 } | ShowTablesStatement { 
 } | InsertStatement {
-      tableNameInsert :: TableName,
-      columnsInsert :: Maybe [String],
-      valuesInsert :: [Value]
+    tableNameInsert :: TableName,
+    columnsInsert :: Maybe [String],
+    valuesInsert :: [Value]
 } | UpdateStatement {
-      tableNameUpdate :: TableName,
-      updates :: [(String, Value)],
-      whereConditions :: Maybe [Condition]
+    tableNameUpdate :: TableName,
+    updates :: [(String, Value)],
+    whereConditions :: Maybe [Condition]
+} | DeleteStatement {
+    tableNameDelete :: TableName,
+    whereConditions :: Maybe [Condition]
 } deriving (Show, Eq)
 
 dateTimeFormat :: String
@@ -193,6 +197,173 @@ executeSql sql = case parseStatement sql of
             Now -> do
                 nowDataFrame <- createNowDataFrame
                 return $ Right nowDataFrame
+    Right (InsertStatement tableName maybeColumns values) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                case maybeColumns of
+                    Just justColumns -> insertWithColumns tableData justColumns values
+                    Nothing -> insertWithoutColumns tableData values
+    Right (UpdateStatement tableName updates whereConditions) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust whereConditions
+                    then updateWithWhere tableData updates whereConditions
+                    else updateWithoutWhere tableData updates
+    Right (DeleteStatement tableName whereConditions) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust whereConditions
+                    then deleteWithWhere tableData whereConditions
+                    else deleteWithoutWhere tableData
+
+-- delete functions
+
+deleteWithoutWhere :: (TableName, DataFrame) -> Execution (Either ErrorMessage DataFrame)
+deleteWithoutWhere (tableName, originalDataFrame) = do
+    let deletedDataFrame = deleteAllRows originalDataFrame
+    saveTable (tableName, deletedDataFrame)
+    return $ Right deletedDataFrame
+
+deleteAllRows :: DataFrame -> DataFrame
+deleteAllRows (DataFrame columns _) = DataFrame columns []
+
+deleteWithWhere :: (TableName, DataFrame) -> Maybe [Condition] -> Execution (Either ErrorMessage DataFrame)
+deleteWithWhere (tableName, originalDataFrame) (Just whereConditions) = do
+    let filteredDataFrame = filterDataFrameByConditions originalDataFrame whereConditions
+    case deleteFilteredRows originalDataFrame filteredDataFrame of
+        Left errMsg -> return $ Left errMsg
+        Right finalDataFrame -> do
+            saveTable (tableName, finalDataFrame)
+            return $ Right finalDataFrame
+
+deleteFilteredRows :: DataFrame -> DataFrame -> Either ErrorMessage DataFrame
+deleteFilteredRows _ (DataFrame _ []) = Left "There are no rows that fit the where conditions"
+deleteFilteredRows (DataFrame columns originalRows) (DataFrame _ filteredRows) =
+    let newRows = filter (\row -> row `notElem` filteredRows) originalRows
+    in if null newRows
+        then Left "Error deleting rows. No rows matching where clause"
+        else Right (DataFrame columns newRows)
+
+-- update functions
+
+updateWithWhere :: (TableName, DataFrame) -> [(ColumnName, Value)] -> Maybe [Condition] -> Execution (Either ErrorMessage DataFrame)
+updateWithWhere (tableName, originalDataFrame) updates (Just whereConditions) = do
+        let filteredDataFrame = filterDataFrameByConditions originalDataFrame whereConditions
+        case updateFilteredRows filteredDataFrame updates of
+            Left errMsg -> return $ Left errMsg
+            Right updatedRows -> do
+                let combinedDataFrame = updateOriginalDataFrame originalDataFrame updatedRows
+                saveTable (tableName, combinedDataFrame)
+                return $ Right combinedDataFrame
+
+filterDataFrameByConditions :: DataFrame -> [Condition] -> DataFrame
+filterDataFrameByConditions (DataFrame columns rows) conditions =
+    let filteredRows = filter (satisfiesConditions conditions columns) rows
+    in DataFrame columns filteredRows
+
+satisfiesConditions :: [Condition] -> [Column] -> Row -> Bool
+satisfiesConditions conditions columns row = all (evalCondition row columns) conditions
+
+evalCondition :: Row -> [Column] -> Condition -> Bool
+evalCondition row columns (Condition columnName op rightValue) =
+    case findColumnIndex columnName columns of
+        Left _ -> False
+        Right colIndex -> let leftValue = row !! colIndex in
+            case op of
+                RelEQ -> leftValue == rightValue
+                RelNE -> leftValue /= rightValue
+                RelLT -> leftValue < rightValue
+                RelGT -> leftValue > rightValue
+                RelLE -> leftValue <= rightValue
+                RelGE -> leftValue >= rightValue 
+
+updateFilteredRows :: DataFrame -> [(ColumnName, Value)] -> Either ErrorMessage [(Row, Row)]
+updateFilteredRows (DataFrame columns rows) updates =
+    let updateRow' row = (row, updateRow row updates columns)
+        updatedRows = map updateRow' rows
+    in Right updatedRows
+
+updateOriginalDataFrame :: DataFrame -> [(Row, Row)] -> DataFrame
+updateOriginalDataFrame (DataFrame columns oldRows) updatedRowTuples =
+    let updatedRows = map snd updatedRowTuples
+        unchangedRows = filter (\oldRow -> notElem oldRow (map fst updatedRowTuples)) oldRows
+        newRows = unchangedRows ++ updatedRows
+    in DataFrame columns newRows
+
+updateWithoutWhere :: (TableName, DataFrame) -> [(ColumnName, Value)] -> Execution (Either ErrorMessage DataFrame)
+updateWithoutWhere (tableName, dataFrame) updates = do
+    case updateAllRows dataFrame updates of
+        Left errMsg -> return $ Left errMsg
+        Right updatedDataFrame -> do
+            saveTable (tableName, updatedDataFrame)
+            return $ Right updatedDataFrame
+
+updateAllRows :: DataFrame -> [(ColumnName, Value)] -> Either ErrorMessage DataFrame
+updateAllRows (DataFrame columns rows) updates =
+    let updatedRows = map (\row -> updateRow row updates columns) rows
+    in Right (DataFrame columns updatedRows)
+
+updateRow :: Row -> [(ColumnName, Value)] -> [Column]-> Row
+updateRow row updates columns =
+    foldl (\acc (colName, value) -> updateValue colName value acc columns) row updates
+
+updateValue :: ColumnName -> Value -> Row -> [Column] -> Row
+updateValue colName newValue row columns =
+    case findColumnIndex colName columns of
+        Left _ -> row -- Column not found, do nothing
+        Right colIndex -> replaceAtIndex colIndex newValue row
+
+replaceAtIndex :: Int -> a -> [a] -> [a]
+replaceAtIndex _ _ [] = []
+replaceAtIndex i newVal (x:xs)
+    | i == 0    = newVal : xs
+    | otherwise = x : replaceAtIndex (i - 1) newVal xs
+
+-- insert functions
+
+insertWithColumns :: (TableName, DataFrame) -> [ColumnName] -> [Value] -> Execution (Either ErrorMessage DataFrame)
+insertWithColumns (tableName, loadedDataFrame) justColumns values = do
+    case insertByColumnsIntoDataFrame loadedDataFrame justColumns values of
+        Left errMsg -> return $ Left errMsg
+        Right updatedDataFrame -> do
+            saveTable (tableName, updatedDataFrame)
+            return $ Right updatedDataFrame
+
+insertByColumnsIntoDataFrame :: DataFrame -> [ColumnName] -> [Value] -> Either ErrorMessage DataFrame
+insertByColumnsIntoDataFrame (DataFrame columns rows) changedColumns newValues =
+    let newRow = map (\col -> case elemIndex col changedColumns of
+                                  Just index -> newValues !! index
+                                  Nothing -> NullValue) [col | Column col _ <- columns]
+    in Right $ DataFrame columns (rows ++ [newRow])
+
+insertWithoutColumns :: (TableName, DataFrame) -> [Value] -> Execution (Either ErrorMessage DataFrame)
+insertWithoutColumns (tableName, loadedDataFrame) values = do
+    validatedValues <- validateRowLength loadedDataFrame values
+    case validatedValues of
+        Left errMsg -> return $ Left errMsg
+        Right newValues -> do
+            let updatedDataFrame = insertRowIntoDataFrame loadedDataFrame newValues
+            saveTable (tableName, updatedDataFrame)
+            return $ Right updatedDataFrame
+
+validateRowLength :: DataFrame -> [Value] -> Execution (Either ErrorMessage [Value])
+validateRowLength (DataFrame columns _) values =
+    if length values == length columns
+        then return $ Right values
+        else return $ Left "Incorrect number of values for the row."
+
+insertRowIntoDataFrame :: DataFrame -> [Value] -> DataFrame
+insertRowIntoDataFrame (DataFrame columns rows) newValues =
+    let updatedRows = rows ++ [newValues] in
+        DataFrame columns updatedRows
+
+-- end of insert functions
 
 loadTables :: [TableName] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
 loadTables [] = return $ Right []
@@ -251,7 +422,6 @@ validateWhereClauseTablesAndColumns tableData maybeWhereClause =
 
     findColumnTable :: ColumnName -> [(TableName, DataFrame)] -> Maybe TableName
     findColumnTable columnName = fmap fst . find (\(_, df) -> columnExistsInDataFrame columnName df)
-
 
 choice :: [Parser a] -> Parser (Maybe a)
 choice [] = pure Nothing
@@ -417,6 +587,7 @@ parseStatement inp = do
                 <|> parseSelectAllStatement
                 <|> parseInsertStatement
                 <|> parseUpdateStatement
+                <|> parseDeleteStatement
 
 -- statement by type parsing
 
@@ -503,6 +674,24 @@ parseUpdateStatement = do
       if null conditions
         then Parser $ \_ -> Left "At least one condition is required in the where clause"
         else return $ UpdateStatement tableName updatesList (Just conditions) 
+
+parseDeleteStatement :: Parser ParsedStatement
+parseDeleteStatement = do
+    _ <- parseKeyword "delete"
+    _ <- parseWhitespace
+    _ <- parseKeyword "from"
+    _ <- parseWhitespace
+    tableName <- parseWord
+    hasWhere <- optional $ parseWhereClauseFlag
+    whereConditions <- if hasWhere == Just True
+                        then Just <$> parseWhereClause'
+                        else pure Nothing
+    case whereConditions of
+        Nothing -> return $ DeleteStatement tableName Nothing 
+        Just conditions ->
+            if null conditions
+                then Parser $ \_ -> Left "At least one condition is required in the where clause"
+                else return $ DeleteStatement tableName (Just conditions)
 
 -- insert and update util parsing functions
 
