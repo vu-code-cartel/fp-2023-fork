@@ -385,3 +385,72 @@ main = hspec $ do
       db <- setupDB
       res <- runExecuteIO db mockGetCurrentTime $ Lib3.executeSql "SELECT SUM(id), MIN(name), NOW() FROM employees;"
       res `shouldBe` Right (DataFrame [Column "Sum(employees.id)" IntegerType,Column "Min(employees.name)" StringType,Column "NOW()" DateTimeType] [[IntegerValue 3,StringValue "Ed",DateTimeValue "1410-07-15 11:00:00"]])
+    it "parses a simple insert statement (uppercase)" $ do
+      let input = "INSERT INTO myTable VALUES (1, 'John', true);"
+      Lib3.parseStatement input `shouldBe` Right (InsertStatement "myTable" Nothing [IntegerValue 1, StringValue "John", BoolValue True])
+    it "parses an insert statement with specified columns" $ do
+      let input = "INSERT INTO myTable (id, name) VALUES (1, 'John');"
+      Lib3.parseStatement input `shouldBe` Right (InsertStatement "myTable" (Just ["id", "name"]) [IntegerValue 1, StringValue "John"])
+    it "handles mismatched column count and values" $ do
+      let input = "INSERT INTO myTable (id, name) VALUES (1, 'John', true);"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "parses a simple insert statement (mixed case)" $ do
+      let input = "InSeRt InTo myTable Values (1, 'John', True);"
+      Lib3.parseStatement input `shouldBe` Right (InsertStatement "myTable" Nothing [IntegerValue 1, StringValue "John", BoolValue True])
+    it "parses a simple insert statement (lowercase)" $ do
+      let input = "insert into myTable VALUES (1, 'John', true);"
+      Lib3.parseStatement input `shouldBe` Right (InsertStatement "myTable" Nothing [IntegerValue 1, StringValue "John", BoolValue True])
+    it "handles string value without single quotes" $ do
+      let input = "INSERT INTO myTable (id, name) VALUES (1, John);"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "parses insert statement without semicolon" $ do
+      let input = "INSERT INTO myTable (id, name) VALUES (1, 'John')"
+      Lib3.parseStatement input `shouldBe` Right (InsertStatement "myTable" (Just ["id", "name"]) [IntegerValue 1, StringValue "John"])
+    it "handles missed keyword in insert statement" $ do
+      let input = "INSERT myTable (id, name, flag) VALUES (1, 'John', true);"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "handles missed tablename in insert statement" $ do
+      let input = "INSERT INTO (id, name, flag) VALUES (1, 'John', true);"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "handles missed values in the brackets in insert statement" $ do
+      let input = "INSERT myTable (id, name, flag) VALUES ();"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "parses statement with excessive white spaces between statements' parts" $ do
+      let input = "  INSERT  INTO    myTable(id,name)   VALUES(1,'John')  ;   "
+      Lib3.parseStatement input `shouldBe` Right (InsertStatement "myTable" (Just ["id", "name"]) [IntegerValue 1, StringValue "John"])
+    it "handles extra letters between semicolon and end of input in insert statement" $ do
+      let input = "INSERT INTO myTable (id, name) VALUES (1, 'John'); extra_letters"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "parses update statement with where(uppercase)" $ do
+      let input = "UPDATE myTable SET column1 = 'value1', column2 = 42 WHERE column3 = 'condition';"
+      Lib3.parseStatement input `shouldBe` Right (UpdateStatement {tableNameUpdate = "myTable", updates = [("column1",StringValue "value1"),("column2",IntegerValue 42)], whereConditions = Just [Condition "column3" RelEQ (StringValue "condition")]})
+    it "parses update statement with where (lowercase)" $ do
+      let input = "update myTable set column1 = 'value1', column2 = 42 WHERE column3 = 'condition';"
+      Lib3.parseStatement input `shouldBe` Right (UpdateStatement {tableNameUpdate = "myTable", updates = [("column1",StringValue "value1"),("column2",IntegerValue 42)], whereConditions = Just [Condition "column3" RelEQ (StringValue "condition")]})
+    it "parses update statement with where (mixedcase)" $ do
+      let input = "UpdATE myTable sET column1 = 'value1', column2 = 42 WhErE column3 != 'condition';"
+      Lib3.parseStatement input `shouldBe` Right (UpdateStatement {tableNameUpdate = "myTable", updates = [("column1",StringValue "value1"),("column2",IntegerValue 42)], whereConditions = Just [Condition "column3" RelNE (StringValue "condition")]})
+    it "parses update statement without where (uppercase)" $ do
+      let input = "UPDATE myTable SET column1 = 'value1', column2 = 42;"
+      Lib3.parseStatement input `shouldBe` Right (UpdateStatement {tableNameUpdate = "myTable", updates = [("column1",StringValue "value1"),("column2",IntegerValue 42)], whereConditions = Nothing})
+    it "parses update statement with excessive white spaces between statements' parts" $ do
+      let input = "UPDATE     myTable     SET    column1   = 'value1', column2 = 42     WHERE   column3 <= 'condition';"
+      Lib3.parseStatement input `shouldBe` Right (UpdateStatement {tableNameUpdate = "myTable", updates = [("column1",StringValue "value1"),("column2",IntegerValue 42)], whereConditions = Just [Condition "column3" RelLE (StringValue "condition")]})
+    it "handles extra letters between semicolon and end of input in update statement" $ do
+      let input = "UPDATE myTable SET column1 = 'value1', column2 = 42 WHERE column3 = 'condition'; extra_letters "
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "parses update statement without semicolon" $ do
+      let input = "UPDATE myTable SET column1 = 'value1', column2 = 42 WHERE column3 = 'condition'"
+      Lib3.parseStatement input `shouldBe` Right (UpdateStatement {tableNameUpdate = "myTable", updates = [("column1",StringValue "value1"),("column2",IntegerValue 42)], whereConditions = Just [Condition "column3" RelEQ (StringValue "condition")]})
+    it "handles invalid value type (for example string without ' ') in update statement" $ do
+      let input = "UPDATE myTable SET column1 = 'value1', column2 = invalid_type;"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "handles update statement without 'SET' keyword" $ do
+      let input = "UPDATE myTable column1 = 'value1' WHERE column2 = 'condition';"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "handles update statement without tablename" $ do
+      let input = "UPDATE SET column1 = 'value1' WHERE column2 = 'condition';"
+      Lib3.parseStatement input `shouldSatisfy` isLeft
+    it "handles update statement without value for the column keyword" $ do
+      let input = "UPDATE myTable SET column1 =  WHERE column2 = 'condition';"
+      Lib3.parseStatement input `shouldSatisfy` isLeft

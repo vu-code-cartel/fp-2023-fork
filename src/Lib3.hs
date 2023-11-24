@@ -15,7 +15,8 @@ module Lib3
     SystemFunction (..),
     parseStatement,
     parseTable,
-    serializeTable
+    serializeTable,
+    Condition(..)
   )
 where
 
