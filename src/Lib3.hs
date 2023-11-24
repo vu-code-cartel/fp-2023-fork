@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Lib3
   ( executeSql,
@@ -24,8 +25,8 @@ import Control.Monad.Free (Free (..), liftF)
 import DataFrame (DataFrame (..), ColumnType (IntegerType, StringType, BoolType, DateTimeType), Column (..), Value (..), Row)
 import Data.Time ( UTCTime )
 import Control.Applicative ( many, some, Alternative((<|>)), optional )
-import Data.List (find, findIndex)
-import Data.Maybe (mapMaybe, catMaybes, listToMaybe)
+import Data.List (find, findIndex, elemIndex)
+import Data.Maybe (mapMaybe, catMaybes, listToMaybe, isJust, fromMaybe)
 import Data.Time.Format (formatTime, defaultTimeLocale, parseTimeM)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -193,6 +194,51 @@ executeSql sql = case parseStatement sql of
             Now -> do
                 nowDataFrame <- createNowDataFrame
                 return $ Right nowDataFrame
+    Right (InsertStatement tableName maybeColumns values) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust maybeColumns
+                    then insertWithColumns tableData maybeColumns values
+                    else insertWithoutColumns tableData values
+
+insertWithColumns :: (TableName, DataFrame) -> Maybe [ColumnName] -> [Value] -> Execution (Either ErrorMessage DataFrame)
+insertWithColumns (tableName, loadedDataFrame) justColumns values = do
+    case insertByColumnsIntoDataFrame loadedDataFrame justColumns values of
+        Left errMsg -> return $ Left errMsg
+        Right updatedDataFrame -> do
+            saveTable (tableName, updatedDataFrame)
+            return $ Right updatedDataFrame
+
+insertByColumnsIntoDataFrame :: DataFrame -> Maybe [ColumnName] -> [Value] -> Either ErrorMessage DataFrame
+insertByColumnsIntoDataFrame (DataFrame columns rows) maybeColumns newValues =
+    let changedColumns = fromMaybe [] maybeColumns
+        newRow = map (\col -> case elemIndex col changedColumns of
+                                  Just index -> newValues !! index
+                                  Nothing -> NullValue) [col | Column col _ <- columns]
+    in Right $ DataFrame columns (rows ++ [newRow])
+
+insertWithoutColumns :: (TableName, DataFrame) -> [Value] -> Execution (Either ErrorMessage DataFrame)
+insertWithoutColumns (tableName, loadedDataFrame) values = do
+    validatedValues <- validateRowLength loadedDataFrame values
+    case validatedValues of
+        Left errMsg -> return $ Left errMsg
+        Right newValues -> do
+            let updatedDataFrame = insertRowIntoDataFrame loadedDataFrame newValues
+            saveTable (tableName, updatedDataFrame)
+            return $ Right updatedDataFrame
+
+validateRowLength :: DataFrame -> [Value] -> Execution (Either ErrorMessage [Value])
+validateRowLength (DataFrame columns _) values =
+    if length values == length columns
+        then return $ Right values
+        else return $ Left "Incorrect number of values for the row."
+
+insertRowIntoDataFrame :: DataFrame -> [Value] -> DataFrame
+insertRowIntoDataFrame (DataFrame columns rows) newValues =
+    let updatedRows = rows ++ [newValues] in
+        DataFrame columns updatedRows
 
 loadTables :: [TableName] -> Execution (Either ErrorMessage [(TableName, DataFrame)])
 loadTables [] = return $ Right []
@@ -251,7 +297,6 @@ validateWhereClauseTablesAndColumns tableData maybeWhereClause =
 
     findColumnTable :: ColumnName -> [(TableName, DataFrame)] -> Maybe TableName
     findColumnTable columnName = fmap fst . find (\(_, df) -> columnExistsInDataFrame columnName df)
-
 
 choice :: [Parser a] -> Parser (Maybe a)
 choice [] = pure Nothing
