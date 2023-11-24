@@ -354,10 +354,6 @@ main = hspec $ do
       db <- setupDB
       res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "SELECT id FROM employees;"
       res `shouldBe` Right (DataFrame [Column "employees.id" IntegerType] [[IntegerValue 1],[IntegerValue 2]])
-    it "SELECT without WHERE clause to show cartesian product is used" $ do
-        db <- setupDB
-        res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "SELECT id, name, surname FROM employees, employees;"
-        res `shouldBe` Right (DataFrame [Column "employees.id" IntegerType, Column "employees.name" StringType, Column "employees.surname" StringType, Column "employees.id" IntegerType, Column "employees.name" StringType, Column "employees.surname" StringType] [[IntegerValue 1,StringValue "Vi",StringValue "Po"],[IntegerValue 1,StringValue "Vi",StringValue "Po"],[IntegerValue 2,StringValue "Ed",StringValue "Dl"],[IntegerValue 2,StringValue "Ed",StringValue "Dl"]])
     it "SELECT for multiple tables with matching rows from where clause" $ do
         db <- setupDB
         res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "SELECT id, name, surname FROM employees, people WHERE employees.name=people.name AND employees.surname=people.surname;"

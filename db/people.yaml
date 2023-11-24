@@ -1,0 +1,14 @@
+tableName: people
+columns:
+- name: id
+  dataType: integer
+- name: name
+  dataType: string
+- name: surname
+  dataType: string
+rows:
+- [1, Vi, Po]
+- [2, Ja, Ne]
+- [3, Jo, Nas]
+- [4, Jo, Po]
+- [5, Ed, Dl]

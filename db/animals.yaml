@@ -1,0 +1,13 @@
+tableName: animals
+columns:
+- name: id
+  dataType: integer
+- name: animal
+  dataType: string
+- name: masterName
+  dataType: string
+- name: masterSurname
+  dataType: string
+rows:
+- [1, Cat, "Ja", "Ne"]
+- [2, Dog, "Jo", "Nas"]
