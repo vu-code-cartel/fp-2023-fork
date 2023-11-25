@@ -22,6 +22,8 @@ module Lib3
 where
 
 import Control.Monad.Free (Free (..), liftF)
+import Control.Monad.Trans.Except
+import Control.Monad.Trans.Class (lift)
 import DataFrame (DataFrame (..), ColumnType (IntegerType, StringType, BoolType, DateTimeType), Column (..), Value (..), Row)
 import Data.Time ( UTCTime )
 import Control.Applicative ( many, some, Alternative((<|>)), optional )
@@ -147,32 +149,8 @@ getTableNames = liftF $ GetTableNames id
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case parseStatement sql of
     Left errorMsg -> return $ Left errorMsg
-    Right (SelectStatement tableNames query maybeWhereClause) -> do
-        loadResult <- loadTables tableNames
-        case loadResult of
-            Left errorMsg -> return $ Left errorMsg
-            Right tableData -> do
-                case updateUnspecifiedTableNames tableData tableNames query of
-                    Left errMsg -> return $ Left errMsg
-                    Right updatedQuery -> do
-                        case validateSelectDataTablesAndColumns tableData updatedQuery of
-                            Left validationError -> return $ Left validationError
-                            Right _ ->
-                                case updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause of
-                                    Left errMsg -> return $ Left errMsg
-                                    Right updatedMaybeWhereClause -> 
-                                        case validateWhereClauseTablesAndColumns tableData updatedMaybeWhereClause of
-                                            Left errMsg -> return $ Left errMsg
-                                            Right _ -> do
-                                                let productDataFrame = cartesianProduct tableData
-                                                let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
-                                                
-                                                if any isAggregate updatedQuery then do
-                                                    aggregateDataFrame <- calculateAggregatesFromDataFrame filteredDataFrame updatedQuery
-                                                    return $ aggregateDataFrame
-                                                else do
-                                                    selectedDataFrame <- selectColumnsFromDataFrame filteredDataFrame updatedQuery
-                                                    return $ Right selectedDataFrame
+    Right (SelectStatement tableNames query maybeWhereClause) -> 
+        executeSelectStatement tableNames query maybeWhereClause
     Right (SelectAllStatement tableNames maybeWhereClause) -> do
         loadResult <- loadTables tableNames
         case loadResult of
@@ -221,6 +199,25 @@ executeSql sql = case parseStatement sql of
                 if isJust whereConditions
                     then deleteWithWhere tableData whereConditions
                     else deleteWithoutWhere tableData
+
+executeSelectStatement :: [TableName] -> SelectQuery -> Maybe WhereClause -> Execution (Either ErrorMessage DataFrame)
+executeSelectStatement tableNames query maybeWhereClause = do
+    loadResult <- loadTables tableNames
+    case loadResult of
+        Left errorMsg -> return $ Left errorMsg
+        Right tableData -> runExceptT $ do
+            updatedQuery <- ExceptT . return $ updateUnspecifiedTableNames tableData tableNames query
+            _ <- ExceptT . return $ validateSelectDataTablesAndColumns tableData updatedQuery
+            updatedMaybeWhereClause <- ExceptT . return $ updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause
+            _ <- ExceptT . return $ validateWhereClauseTablesAndColumns tableData updatedMaybeWhereClause
+
+            let productDataFrame = cartesianProduct tableData
+            let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
+
+            if any isAggregate updatedQuery then
+                ExceptT $ calculateAggregatesFromDataFrame filteredDataFrame updatedQuery
+            else
+                lift $ selectColumnsFromDataFrame filteredDataFrame updatedQuery
 
 -- delete functions
 
