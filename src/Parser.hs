@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+
 module Parser ()
 where
 import Control.Monad (void) 
