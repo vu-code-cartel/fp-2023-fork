@@ -147,6 +147,7 @@ executable fp2023-sql-server
   build-depends:
       Spock
     , aeson
+    , async
     , base >=4.7 && <5
     , directory
     , extra
@@ -156,6 +157,7 @@ executable fp2023-sql-server
     , http-types
     , mtl
     , repline
+    , stm
     , terminal-size
     , text
     , time

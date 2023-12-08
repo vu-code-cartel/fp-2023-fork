@@ -1,4 +1,4 @@
-tableName: employees
+tableName: "employees"
 columns:
 - name: id
   dataType: integer
@@ -7,5 +7,5 @@ columns:
 - name: surname
   dataType: string
 rows:
-- [1, Vi, Po]
-- [2, Ed, Dl]
+- [1, "Vi", "Po"]
+- [2, "Ed", "Dl"]
