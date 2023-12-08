@@ -88,8 +88,8 @@ executables:
     - filepath
     - directory
   fp2023-sql-server:
-    main:                Main.hs
-    source-dirs:         app4/Server
+    main:                Server/Main.hs
+    source-dirs:         app4 
     ghc-options:
     - -threaded
     - -rtsopts
@@ -109,8 +109,8 @@ executables:
     - filepath
     - directory
   fp2023-sql-client:
-    main:                Main.hs
-    source-dirs:         app4/Client
+    main:                Client/Main.hs
+    source-dirs:         app4
     ghc-options:
     - -threaded
     - -rtsopts
