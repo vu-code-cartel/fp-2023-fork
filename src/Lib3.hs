@@ -63,6 +63,7 @@ data ExecutionAlgebra next
   | SaveTable (TableName, DataFrame) (() -> next)
   | GetTime (UTCTime -> next)
   | GetTableNames ([TableName] -> next)
+  | RemoveTable TableName (Maybe ErrorMessage -> next)
   -- feel free to add more constructors here
   deriving Functor
 
@@ -145,6 +146,9 @@ getTime = liftF $ GetTime id
 
 getTableNames :: Execution [TableName]
 getTableNames = liftF $ GetTableNames id
+
+removeTable :: TableName -> Execution (Maybe ErrorMessage)
+removeTable tableName = liftF $ RemoveTable tableName id
 
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case parseStatement sql of

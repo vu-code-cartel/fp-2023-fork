@@ -13,12 +13,11 @@ import Lib2 qualified
 import Lib3 qualified
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Free (Free (..))
-import System.Directory (listDirectory, doesFileExist)
+import System.Directory (listDirectory, removeFile)
 import System.FilePath (dropExtension, pathSeparator, takeExtension)
 import Control.Concurrent.STM.TVar (TVar, newTVarIO, readTVarIO, writeTVar)
 import Control.Concurrent.STM (readTVar, atomically)
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (Concurrently (..), runConcurrently)
+import Control.Concurrent (threadDelay, forkIO)
 
 type ConcurrentTable = TVar (TableName, DataFrame)
 type ConcurrentDb = TVar [ConcurrentTable]
@@ -30,6 +29,31 @@ dbDirectory = "db"
 
 dbFormat :: String
 dbFormat = ".yaml"
+
+main :: IO ()
+main = do
+  db <- newTVarIO =<< mapM newTVarIO =<< liftIO loadDb
+  cfg <- defaultSpockCfg () PCNoDatabase (AppState { db = db })
+  forkIO $ syncDb db
+  runSpock webServerPort (spock cfg app)
+
+app :: SpockM () () AppState ()
+app = do
+  post root $ do
+    appState <- getState
+    mreq <- jsonBody :: ApiAction (Maybe SqlRequest)
+    case mreq of
+      Nothing -> do
+        setStatus badRequest400
+        json SqlErrorResponse { errorMessage = "Request body format is incorrect." }
+      Just req -> do
+        result <- liftIO $ runExecuteIO (db appState) $ Lib3.executeSql $ query req
+        case result of
+          Left err -> do
+            setStatus badRequest400
+            json SqlErrorResponse { errorMessage = err }
+          Right df -> do
+            json SqlSuccessResponse { dataFrame = df }
 
 getDbTables :: IO [String]
 getDbTables = do
@@ -70,34 +94,6 @@ syncDb db = do
           writeFile (getTableFilePath $ fst table) serializedTable
           syncDb' xs
 
-main :: IO ()
-main = do
-  db <- newTVarIO =<< mapM newTVarIO =<< liftIO loadDb
-  cfg <- defaultSpockCfg () PCNoDatabase (AppState { db = db })
-  _
-    <- runConcurrently $ (,,)
-    <$> Concurrently (syncDb db)
-    <*> Concurrently (runSpock webServerPort (spock cfg app))
-  return ()
-
-app :: SpockM () () AppState ()
-app = do
-  post root $ do
-    appState <- getState
-    mreq <- jsonBody :: ApiAction (Maybe SqlRequest)
-    case mreq of
-      Nothing -> do
-        setStatus badRequest400
-        json SqlErrorResponse { errorMessage = "Request body format is incorrect." }
-      Just req -> do
-        result <- liftIO $ runExecuteIO (db appState) $ Lib3.executeSql $ query req
-        case result of
-          Left err -> do
-            setStatus badRequest400
-            json SqlErrorResponse { errorMessage = err }
-          Right df -> do
-            json SqlSuccessResponse { dataFrame = df }
-
 runExecuteIO :: ConcurrentDb -> Lib3.Execution r -> IO r
 runExecuteIO dbRef (Pure r) = return r
 runExecuteIO dbRef (Free step) = do
@@ -121,7 +117,15 @@ runExecuteIO dbRef (Free step) = do
           return $ next ()
         Just tableRef -> atomically $ writeTVar tableRef table >>= return . next
     runStep (Lib3.GetTableNames next) = getTableNames >>= return . next
-
+    runStep (Lib3.RemoveTable tableName next) = do
+      t <- findTable tableName
+      case t of
+        Nothing -> return $ next $ Just $ "Table '" ++ tableName ++ "' does not exist."
+        Just ref -> do
+          tableRefs <- readTVarIO dbRef
+          atomically $ writeTVar dbRef $ filter (/= ref) tableRefs
+          removeFile $ getTableFilePath tableName
+          return $ next Nothing
     findTable :: String -> IO (Maybe ConcurrentTable)
     findTable tableName = do
       db <- readTVarIO dbRef
@@ -134,7 +138,6 @@ runExecuteIO dbRef (Free step) = do
           if fst table == tableName
             then return $ Just x
             else findTable' xs
-    
     getTableNames :: IO [TableName]
     getTableNames = do
       db <- readTVarIO dbRef

@@ -109,7 +109,6 @@ executables:
     - filepath
     - directory
     - stm
-    - async
   fp2023-sql-client:
     main:                Main.hs
     source-dirs:         client
