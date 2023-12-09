@@ -157,6 +157,7 @@ executable fp2023-sql-server
     , http-types
     , mtl
     , repline
+    , stm
     , terminal-size
     , text
     , time

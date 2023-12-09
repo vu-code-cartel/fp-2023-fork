@@ -1,4 +1,4 @@
-tableName: animals
+tableName: "animals"
 columns:
 - name: id
   dataType: integer
@@ -9,5 +9,5 @@ columns:
 - name: masterSurname
   dataType: string
 rows:
-- [1, Cat, "Ja", "Ne"]
-- [2, Dog, "Jo", "Nas"]
+- [1, "Cat", "Ja", "Ne"]
+- [2, "Dog", "Jo", "Nas"]

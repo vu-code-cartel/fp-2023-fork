@@ -108,6 +108,7 @@ executables:
     - free
     - filepath
     - directory
+    - stm
   fp2023-sql-client:
     main:                Main.hs
     source-dirs:         client
