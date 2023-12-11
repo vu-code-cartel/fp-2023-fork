@@ -87,7 +87,12 @@ data ParsedStatement = SelectStatement {
 } | DeleteStatement {
     tableNameDelete :: TableName,
     whereConditions :: Maybe [Condition]
-} deriving (Show, Eq)
+} | DropTableStatement{
+    table :: TableName
+} | CreateTableStatement{
+    table :: TableName,
+    columns :: [(ColumnName, ColumnType)] 
+}deriving (Show, Eq)
 --
 -- monad + state parser
 
@@ -176,8 +181,53 @@ parseStatement inp = do
                 <|> parseSelectStatement
                 <|> parseInsertStatement
                 <|> parseUpdateStatement
-                <|> parseDeleteStatement    
---
+                <|> parseDeleteStatement
+                <|> parseDropTableStatement  
+                <|> parseCreateTableStatement
+
+--statement parsers by type
+parseDropTableStatement :: Parser ParsedStatement
+parseDropTableStatement = do
+    _ <- parseKeyword "drop"
+    _ <- parseWhitespace
+    _ <- parseKeyword "table"
+    _ <- parseWhitespace
+    tableName <- parseWord 
+    pure $ DropTableStatement tableName
+
+parseCreateTableStatement :: Parser ParsedStatement
+parseCreateTableStatement = do
+    _ <- parseKeyword "create"
+    _ <- parseWhitespace
+    _ <- parseKeyword "table"
+    _ <- parseWhitespace
+    tableName <- parseWord
+    _ <- optional parseWhitespace
+    _ <- parseChar '('
+    columnsWithType <- parseColumnList
+    _ <- optional parseWhitespace
+    _ <- parseChar ')'
+    _ <- optional parseWhitespace
+    pure $ CreateTableStatement tableName columnsWithType
+
+parseColumnList :: Parser [(ColumnName, ColumnType)]
+parseColumnList = parseColumn `sepBy` (optional parseWhitespace *> parseChar ',' <* optional parseWhitespace)
+
+parseColumn :: Parser (ColumnName, ColumnType)
+parseColumn = do
+    columnName <- parseWord
+    _ <- parseWhitespace
+    columnType <- parseWord >>= either (throwE . show) pure . parseColumnType
+    pure (columnName, columnType)
+
+parseColumnType :: String -> Either ParseError ColumnType
+parseColumnType "int" = Right IntegerType
+parseColumnType "varchar" = Right StringType
+parseColumnType "bool" = Right BoolType
+parseColumnType "date" = Right DateTimeType
+parseColumnType other = Left $ "Unknown column type: " ++ other
+   
+
 --statement parsers by type
 parseShowTableStatement :: Parser ParsedStatement
 parseShowTableStatement = do
