@@ -476,3 +476,27 @@ main = hspec $ do
       db <- setupDB
       res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "DELETE FROM employees where name='Vi'"
       res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 2, StringValue "Ed", StringValue "Dl"]])
+    it "parses drop table statement (lowercase)" $ do
+      let input = "drop table tablename;"
+      Parser.parseStatement input `shouldBe` Right (Parser.DropTableStatement { Parser.table = "tablename" })
+    it "parses drop table statement with (mixed case)" $ do
+      let input = "dRoP tAbLe tablename;"
+      Parser.parseStatement input `shouldBe` Right (Parser.DropTableStatement { Parser.table = "tablename" })
+    it "parses drop table statement with (uppercase)" $ do
+      let input = "DROP TABLE tablename;"
+      Parser.parseStatement input `shouldBe` Right (Parser.DropTableStatement { Parser.table = "tablename" })
+    it "parses drop table statement with many whitespaces" $ do
+      let input = "drop    table          tablename;"
+      Parser.parseStatement input `shouldBe` Right (Parser.DropTableStatement { Parser.table = "tablename" })
+    it "handles incorrect drop table statement with missed keyword" $ do
+      let input = "drop tablename;"
+      Parser.parseStatement input `shouldSatisfy` isLeft
+    it "parses create table statement" $ do
+      let input = "create table exampleTable (id int , name varchar , flag bool, holidays_from date );"
+      Parser.parseStatement input `shouldBe` Right (Parser.CreateTableStatement {Parser.table = "exampleTable", Parser.columns = [("id",IntegerType),("name",StringType),("flag",BoolType),("holidays_from",DateTimeType)]})
+    it "handles incorrect create table statement with missed keyword" $ do
+      let input = "create exampleTable (id int , name varchar , flag bool, holidays_from date );"
+      Parser.parseStatement input `shouldSatisfy` isLeft
+    it "handles incorrect create table statement with invalid datatype" $ do
+      let input = "create table exampleTable (id int , name varchar , flag bol, holidays_from date );"
+      Parser.parseStatement input `shouldSatisfy` isLeft
