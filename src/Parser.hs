@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE InstanceSigs #-}
 
-module Parser ()
+module Parser (parseStatement, ParsedStatement(..))
 where
 import Control.Monad (void) 
 import Data.Char (isSpace, toLower, isAlphaNum, isDigit)
