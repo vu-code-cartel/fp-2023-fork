@@ -1,7 +1,20 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE InstanceSigs #-}
 
-module Parser ()
+module Parser (
+    ParsedStatement (..),
+    RelationalOperator(..),
+    LogicalOperator(..),
+    Expression(..),
+    AggregateFunction(..),
+    Aggregate(..),
+    WhereCriterion(..),
+    SystemFunction(..),
+    SelectData(..),
+    SelectQuery(..),
+    Condition(..),
+    parseStatement
+    )
 where
 import Control.Monad (void) 
 import Data.Char (isSpace, toLower, isAlphaNum, isDigit)
@@ -11,7 +24,6 @@ import Control.Monad.Trans.State.Strict (State, StateT, get, put, runState, runS
 import Control.Monad.Trans.Class(lift, MonadTrans)
 import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row)
 import InMemoryTables (TableName, database)
-
 
 type ErrorMessage = String
 

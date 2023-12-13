@@ -13,7 +13,6 @@ module Lib2
     executeStatement,
     ParsedStatement (..),
     SelectQuery (..),
-    RelationalOperator (..),
     SelectData (..),
     Aggregate (..),
     AggregateFunction (..),
@@ -44,20 +43,11 @@ import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row)
 import InMemoryTables (TableName, database)
 import Control.Applicative ( many, some, Alternative(empty, (<|>)), optional )
 import Data.Char (toLower, isSpace, isAlphaNum)
+import Parser (RelationalOperator(..))
 
 type ErrorMessage = String
 type Database = [(TableName, DataFrame)]
 type ColumnName = String
-
-data RelationalOperator
-    = RelEQ
-    | RelNE
-    | RelLT
-    | RelGT
-    | RelLE
-    | RelGE
-    deriving (Show, Eq)
-
 
 data LogicalOperator
     = And

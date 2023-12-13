@@ -3,8 +3,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 
 module Lib3
-  ( executeSql,
-    ParsedStatement(..),
+  ( Lib3.ParsedStatement(..),
     Execution,
     ExecutionAlgebra(..),
     SelectData (..),
@@ -14,10 +13,11 @@ module Lib3
     WhereClause (..),
     WhereCriterion (..),
     SystemFunction (..),
-    parseStatement,
+    executeSql,
+    executeSqlWithParser,
+    Lib3.parseStatement,
     parseTable,
-    serializeTable,
-    Condition(..)
+    serializeTable
   )
 where
 
@@ -38,10 +38,6 @@ import Data.Char (toLower, isSpace, isDigit)
 import Lib1 (validateDataFrame)
 import Lib2(
     Parser(..),
-    RelationalOperator(..),
-    Aggregate(..),
-    AggregateFunction(..),
-    LogicalOperator(..),
     parseChar,
     parseWhitespace,
     parseKeyword,
@@ -51,12 +47,23 @@ import Lib2(
     parseEndOfStatement,
     parseRelationalOperator,
     )
+import Parser (
+    ParsedStatement(..),
+    RelationalOperator(..),
+    LogicalOperator(..),
+    Expression(..),
+    AggregateFunction(..),
+    Aggregate(..),
+    WhereCriterion(..),
+    SystemFunction(..),
+    SelectData(..),
+    SelectQuery(..),
+    Condition(..),
+    parseStatement
+    )
 
 type TableName = String
 type FileContent = String
-
-data Condition = Condition String RelationalOperator Value
-  deriving (Show, Eq)
 
 data ExecutionAlgebra next
   = LoadTable TableName (Either ErrorMessage (TableName, DataFrame) -> next)
@@ -86,25 +93,6 @@ instance Y.FromJSON SerializedTable
 type ErrorMessage = String
 type ColumnName = String
 
-data Expression
-    = ValueExpression Value
-    | ColumnExpression ColumnName (Maybe TableName)
-    deriving (Show, Eq)
-
-data WhereCriterion = WhereCriterion Expression RelationalOperator Expression
-    deriving (Show, Eq)
-
-data SystemFunction
-    = Now
-    deriving (Show, Eq)
-
-data SelectData
-    = SelectColumn ColumnName (Maybe TableName)
-    | SelectAggregate Aggregate (Maybe TableName)
-    | SelectSystemFunction SystemFunction
-    deriving (Show, Eq)
-
-type SelectQuery = [SelectData]
 type WhereClause = [(WhereCriterion, Maybe LogicalOperator)]
 
 data ParsedStatement = SelectStatement {
@@ -150,12 +138,12 @@ getTableNames = liftF $ GetTableNames id
 removeTable :: TableName -> Execution (Maybe ErrorMessage)
 removeTable tableName = liftF $ RemoveTable tableName id
 
-executeSql :: String -> Execution (Either ErrorMessage DataFrame)
-executeSql sql = case parseStatement sql of
+executeSqlWithParser :: String -> Execution (Either ErrorMessage DataFrame)
+executeSqlWithParser sql = case Parser.parseStatement sql of
     Left errorMsg -> return $ Left errorMsg
-    Right (SelectStatement tableNames query maybeWhereClause) -> 
+    Right (Parser.SelectStatement tableNames query maybeWhereClause) -> 
         executeSelectStatement tableNames query maybeWhereClause
-    Right (SelectAllStatement tableNames maybeWhereClause) -> do
+    Right (Parser.SelectAllStatement tableNames maybeWhereClause) -> do
         loadResult <- loadTables tableNames
         case loadResult of
             Left errorMsg -> return $ Left errorMsg
@@ -166,20 +154,20 @@ executeSql sql = case parseStatement sql of
                         let productDataFrame = cartesianProduct tableData
                         let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
                         return $ Right filteredDataFrame
-    Right (ShowTableStatement table) -> do
+    Right (Parser.ShowTableStatement table) -> do
         loadResult <- loadTable table
         case loadResult of 
             Left errorMsg -> return $ Left errorMsg
             Right (_, dataframe) -> return $ Right dataframe
-    Right ShowTablesStatement -> do
+    Right Parser.ShowTablesStatement -> do
         showTablesFrame <- createShowTablesFrame
         return $ Right showTablesFrame
-    Right (SystemFunctionStatement function) -> do
+    Right (Parser.SystemFunctionStatement function) -> do
         case function of
             Now -> do
                 nowDataFrame <- createNowDataFrame
                 return $ Right nowDataFrame
-    Right (InsertStatement tableName maybeColumns values) -> do
+    Right (Parser.InsertStatement tableName maybeColumns values) -> do
         loadResult <- loadTable tableName
         case loadResult of
             Left errorMsg -> return $ Left errorMsg
@@ -187,7 +175,7 @@ executeSql sql = case parseStatement sql of
                 case maybeColumns of
                     Just justColumns -> insertWithColumns tableData justColumns values
                     Nothing -> insertWithoutColumns tableData values
-    Right (UpdateStatement tableName updates whereConditions) -> do
+    Right (Parser.UpdateStatement tableName updates whereConditions) -> do
         loadResult <- loadTable tableName
         case loadResult of
             Left errorMsg -> return $ Left errorMsg
@@ -195,7 +183,65 @@ executeSql sql = case parseStatement sql of
                 if isJust whereConditions
                     then updateWithWhere tableData updates whereConditions
                     else updateWithoutWhere tableData updates
-    Right (DeleteStatement tableName whereConditions) -> do
+    Right (Parser.DeleteStatement tableName whereConditions) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust whereConditions
+                    then deleteWithWhere tableData whereConditions
+                    else deleteWithoutWhere tableData
+    Right (Parser.DropTableStatement tableName) -> do
+        return $ Left "Not implemented"
+    Right (Parser.CreateTableStatement tableName columns) -> do
+        return $ Left "Not implemented"
+
+executeSql :: String -> Execution (Either ErrorMessage DataFrame)
+executeSql sql = case Lib3.parseStatement sql of
+    Left errorMsg -> return $ Left errorMsg
+    Right (Lib3.SelectStatement tableNames query maybeWhereClause) -> 
+        executeSelectStatement tableNames query maybeWhereClause
+    Right (Lib3.SelectAllStatement tableNames maybeWhereClause) -> do
+        loadResult <- loadTables tableNames
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do 
+                case updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause of
+                    Left errMsg -> return $ Left errMsg
+                    Right updatedMaybeWhereClause -> do
+                        let productDataFrame = cartesianProduct tableData
+                        let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
+                        return $ Right filteredDataFrame
+    Right (Lib3.ShowTableStatement table) -> do
+        loadResult <- loadTable table
+        case loadResult of 
+            Left errorMsg -> return $ Left errorMsg
+            Right (_, dataframe) -> return $ Right dataframe
+    Right Lib3.ShowTablesStatement -> do
+        showTablesFrame <- createShowTablesFrame
+        return $ Right showTablesFrame
+    Right (Lib3.SystemFunctionStatement function) -> do
+        case function of
+            Now -> do
+                nowDataFrame <- createNowDataFrame
+                return $ Right nowDataFrame
+    Right (Lib3.InsertStatement tableName maybeColumns values) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                case maybeColumns of
+                    Just justColumns -> insertWithColumns tableData justColumns values
+                    Nothing -> insertWithoutColumns tableData values
+    Right (Lib3.UpdateStatement tableName updates whereConditions) -> do
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left errorMsg -> return $ Left errorMsg
+            Right tableData -> do
+                if isJust whereConditions
+                    then updateWithWhere tableData updates whereConditions
+                    else updateWithoutWhere tableData updates
+    Right (Lib3.DeleteStatement tableName whereConditions) -> do
         loadResult <- loadTable tableName
         case loadResult of
             Left errorMsg -> return $ Left errorMsg
@@ -574,13 +620,13 @@ parseTable content = do
 
 ----------------------------------------------------------------
 --------- updated parsing stuff
-parseStatement :: String -> Either ErrorMessage ParsedStatement
+parseStatement :: String -> Either ErrorMessage Lib3.ParsedStatement
 parseStatement inp = do
     (rest, statement) <- runParser parser (dropWhile isSpace inp)
     _ <- runParser parseEndOfStatement rest
     return statement
     where
-        parser :: Parser ParsedStatement
+        parser :: Parser Lib3.ParsedStatement
         parser = parseSelectStatement
                 <|> parseSystemFunctionStatement
                 <|> parseShowTableStatement
@@ -592,28 +638,28 @@ parseStatement inp = do
 
 -- statement by type parsing
 
-parseShowTableStatement :: Parser ParsedStatement
+parseShowTableStatement :: Parser Lib3.ParsedStatement
 parseShowTableStatement = do
     _ <- parseKeyword "show"
     _ <- parseWhitespace
     _ <- parseKeyword "table"
     _ <- parseWhitespace
-    ShowTableStatement <$> parseWord
+    Lib3.ShowTableStatement <$> parseWord
 
-parseShowTablesStatement :: Parser ParsedStatement
+parseShowTablesStatement :: Parser Lib3.ParsedStatement
 parseShowTablesStatement = do
     _ <- parseKeyword "show"
     _ <- parseWhitespace
     _ <- parseKeyword "tables"
-    pure ShowTablesStatement
+    pure Lib3.ShowTablesStatement
 
-parseSystemFunctionStatement :: Parser ParsedStatement
+parseSystemFunctionStatement :: Parser Lib3.ParsedStatement
 parseSystemFunctionStatement = do
     _ <- parseKeyword "select"
     _ <- parseWhitespace
-    SystemFunctionStatement <$> parseSystemFunction
+    Lib3.SystemFunctionStatement <$> parseSystemFunction
 
-parseSelectAllStatement :: Parser ParsedStatement
+parseSelectAllStatement :: Parser Lib3.ParsedStatement
 parseSelectAllStatement = do
     _ <- parseKeyword "select"
     _ <- parseWhitespace
@@ -623,9 +669,9 @@ parseSelectAllStatement = do
     _ <- parseWhitespace
     tableNames <- parseWord `sepBy` (parseChar ',' *> optional parseWhitespace)
     whereClause <- optional parseWhereClause
-    pure $ SelectAllStatement tableNames whereClause
+    pure $ Lib3.SelectAllStatement tableNames whereClause
 
-parseSelectStatement :: Parser ParsedStatement
+parseSelectStatement :: Parser Lib3.ParsedStatement
 parseSelectStatement = do
     _ <- parseKeyword "select"
     _ <- parseWhitespace
@@ -635,9 +681,9 @@ parseSelectStatement = do
     _ <- parseWhitespace
     tableNames <- parseWord `sepBy` (parseChar ',' *> optional parseWhitespace)
     whereClause <- optional parseWhereClause
-    pure $ SelectStatement tableNames selectData whereClause
+    pure $ Lib3.SelectStatement tableNames selectData whereClause
 
-parseInsertStatement :: Parser ParsedStatement
+parseInsertStatement :: Parser Lib3.ParsedStatement
 parseInsertStatement = do
   _ <- parseKeyword "insert"
   _ <- parseWhitespace
@@ -650,13 +696,13 @@ parseInsertStatement = do
   parseOptionalWhitespace
   values <- parseValues
   case columns of
-    Nothing -> return $ InsertStatement tableName columns values
+    Nothing -> return $ Lib3.InsertStatement tableName columns values
     Just cols ->
       if length cols == length values
-        then return $ InsertStatement tableName columns values
+        then return $ Lib3.InsertStatement tableName columns values
         else Parser $ \_ -> Left "Column count does not match the number of values provided"
 
-parseUpdateStatement :: Parser ParsedStatement
+parseUpdateStatement :: Parser Lib3.ParsedStatement
 parseUpdateStatement = do
   _ <- parseKeyword "update"
   _ <- parseWhitespace
@@ -670,13 +716,13 @@ parseUpdateStatement = do
                        then Just <$> parseWhereClause'
                        else pure Nothing
   case whereConditions of
-    Nothing -> return $ UpdateStatement tableName updatesList Nothing 
+    Nothing -> return $ Lib3.UpdateStatement tableName updatesList Nothing 
     Just conditions ->
       if null conditions
         then Parser $ \_ -> Left "At least one condition is required in the where clause"
-        else return $ UpdateStatement tableName updatesList (Just conditions) 
+        else return $ Lib3.UpdateStatement tableName updatesList (Just conditions) 
 
-parseDeleteStatement :: Parser ParsedStatement
+parseDeleteStatement :: Parser Lib3.ParsedStatement
 parseDeleteStatement = do
     _ <- parseKeyword "delete"
     _ <- parseWhitespace
@@ -688,11 +734,11 @@ parseDeleteStatement = do
                         then Just <$> parseWhereClause'
                         else pure Nothing
     case whereConditions of
-        Nothing -> return $ DeleteStatement tableName Nothing 
+        Nothing -> return $ Lib3.DeleteStatement tableName Nothing 
         Just conditions ->
             if null conditions
                 then Parser $ \_ -> Left "At least one condition is required in the where clause"
-                else return $ DeleteStatement tableName (Just conditions)
+                else return $ Lib3.DeleteStatement tableName (Just conditions)
 
 -- insert and update util parsing functions
 

@@ -47,7 +47,7 @@ app = do
         setStatus badRequest400
         json SqlErrorResponse { errorMessage = "Request body format is incorrect." }
       Just req -> do
-        result <- liftIO $ runExecuteIO (db appState) $ Lib3.executeSql $ query req
+        result <- liftIO $ runExecuteIO (db appState) $ Lib3.executeSqlWithParser $ query req
         case result of
           Left err -> do
             setStatus badRequest400
