@@ -493,7 +493,7 @@ main = hspec $ do
       Parser.parseStatement input `shouldSatisfy` isLeft
     it "parses create table statement" $ do
       let input = "create table exampleTable (id int , name varchar , flag bool, holidays_from date );"
-      Parser.parseStatement input `shouldBe` Right (Parser.CreateTableStatement {Parser.table = "exampleTable", Parser.columns = [("id",IntegerType),("name",StringType),("flag",BoolType),("holidays_from",DateTimeType)]})
+      Parser.parseStatement input `shouldBe` Right (Parser.CreateTableStatement {Parser.table = "exampleTable", Parser.newColumns = [Column "id" IntegerType,Column "name" StringType,Column "flag" BoolType,Column "holidays_from" DateTimeType]})
     it "handles incorrect create table statement with missed keyword" $ do
       let input = "create exampleTable (id int , name varchar , flag bool, holidays_from date );"
       Parser.parseStatement input `shouldSatisfy` isLeft
