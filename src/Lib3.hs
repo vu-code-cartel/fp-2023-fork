@@ -192,10 +192,15 @@ executeSqlWithParser sql = case Parser.parseStatement sql of
                     then deleteWithWhere tableData whereConditions
                     else deleteWithoutWhere tableData
     Right (Parser.DropTableStatement tableName) -> do
-        return $ Left "Not implemented"
+        _ <- removeTable tableName
+        return $ Right (DataFrame [] [])
     Right (Parser.CreateTableStatement tableName columns) -> do
-        return $ Left "Not implemented"
-
+        loadResult <- loadTable tableName
+        case loadResult of
+            Left _ -> do
+                saveTable (tableName, DataFrame columns [])
+                return $ Right (DataFrame columns [])
+            Right _ -> return $ Left "Table already exists."
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case Lib3.parseStatement sql of
     Left errorMsg -> return $ Left errorMsg

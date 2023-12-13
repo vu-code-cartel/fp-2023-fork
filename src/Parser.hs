@@ -103,7 +103,7 @@ data ParsedStatement = SelectStatement {
     table :: TableName
 } | CreateTableStatement{
     table :: TableName,
-    columns :: [(ColumnName, ColumnType)] 
+    newColumns :: [Column] 
 }deriving (Show, Eq)
 --
 -- monad + state parser
@@ -222,15 +222,15 @@ parseCreateTableStatement = do
     _ <- optional parseWhitespace
     pure $ CreateTableStatement tableName columnsWithType
 
-parseColumnList :: Parser [(ColumnName, ColumnType)]
+parseColumnList :: Parser [Column]
 parseColumnList = parseColumn `sepBy` (optional parseWhitespace *> parseChar ',' <* optional parseWhitespace)
 
-parseColumn :: Parser (ColumnName, ColumnType)
+parseColumn :: Parser Column
 parseColumn = do
     columnName <- parseWord
     _ <- parseWhitespace
     columnType <- parseWord >>= either (throwE . show) pure . parseColumnType
-    pure (columnName, columnType)
+    pure (Column columnName columnType)
 
 parseColumnType :: String -> Either ParseError ColumnType
 parseColumnType "int" = Right IntegerType
