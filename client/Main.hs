@@ -37,7 +37,7 @@ completer n = do
   let names = [
               "select", "*", "from", "show", "table",
               "tables", "insert", "into", "values",
-              "set", "update", "delete"
+              "set", "update", "delete", "drop", "create"
               ]
   return $ Prelude.filter (L.isPrefixOf n) names
 

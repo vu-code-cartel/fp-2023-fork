@@ -1,7 +1,20 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE InstanceSigs #-}
 
-module Parser (parseStatement, ParsedStatement(..))
+module Parser (
+    ParsedStatement (..),
+    RelationalOperator(..),
+    LogicalOperator(..),
+    Expression(..),
+    AggregateFunction(..),
+    Aggregate(..),
+    WhereCriterion(..),
+    SystemFunction(..),
+    SelectData(..),
+    SelectQuery(..),
+    Condition(..),
+    parseStatement
+    )
 where
 import Control.Monad (void) 
 import Data.Char (isSpace, toLower, isAlphaNum, isDigit)
@@ -11,7 +24,6 @@ import Control.Monad.Trans.State.Strict (State, StateT, get, put, runState, runS
 import Control.Monad.Trans.Class(lift, MonadTrans)
 import DataFrame (DataFrame(..), Column(..), ColumnType(..), Value(..), Row)
 import InMemoryTables (TableName, database)
-
 
 type ErrorMessage = String
 
@@ -91,7 +103,7 @@ data ParsedStatement = SelectStatement {
     table :: TableName
 } | CreateTableStatement{
     table :: TableName,
-    columns :: [(ColumnName, ColumnType)] 
+    newColumns :: [Column] 
 }deriving (Show, Eq)
 --
 -- monad + state parser
@@ -210,15 +222,15 @@ parseCreateTableStatement = do
     _ <- optional parseWhitespace
     pure $ CreateTableStatement tableName columnsWithType
 
-parseColumnList :: Parser [(ColumnName, ColumnType)]
+parseColumnList :: Parser [Column]
 parseColumnList = parseColumn `sepBy` (optional parseWhitespace *> parseChar ',' <* optional parseWhitespace)
 
-parseColumn :: Parser (ColumnName, ColumnType)
+parseColumn :: Parser Column
 parseColumn = do
     columnName <- parseWord
     _ <- parseWhitespace
     columnType <- parseWord >>= either (throwE . show) pure . parseColumnType
-    pure (columnName, columnType)
+    pure (Column columnName columnType)
 
 parseColumnType :: String -> Either ParseError ColumnType
 parseColumnType "int" = Right IntegerType
