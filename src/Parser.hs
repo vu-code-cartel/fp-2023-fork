@@ -13,6 +13,8 @@ module Parser (
     SelectData(..),
     SelectQuery(..),
     Condition(..),
+    OrderClause(..),
+    SortDirection(..),
     parseStatement
     )
 where
@@ -69,6 +71,10 @@ data SelectData
     | SelectSystemFunction SystemFunction
     deriving (Show, Eq)
 
+data SortDirection = Asc | Desc deriving (Show, Eq)
+
+type OrderClause = ([(SortDirection, Maybe TableName, ColumnName)])
+
 type SelectQuery = [SelectData]
 
 type WhereClause = [(WhereCriterion, Maybe LogicalOperator)]
@@ -79,10 +85,12 @@ data Condition = Condition String RelationalOperator Value
 data ParsedStatement = SelectStatement {
     tables :: [TableName],
     query :: SelectQuery,
-    whereClause :: Maybe WhereClause
+    whereClause :: Maybe WhereClause,
+    orderClause :: Maybe OrderClause
 } | SelectAllStatement {
     tables :: [TableName],
-    whereClause :: Maybe WhereClause
+    whereClause :: Maybe WhereClause,
+    orderClause :: Maybe OrderClause
 } | SystemFunctionStatement {
     function :: SystemFunction
 } | ShowTableStatement {
@@ -265,8 +273,10 @@ parseSelectAllStatement = do
     _ <- parseKeyword "from"
     _ <- parseWhitespace
     tableNames <- parseWord `sepBy` (parseChar ',' *> optional parseWhitespace)
+    _ <- optional parseWhitespace
     whereClause <- optional parseWhereClause
-    pure $ SelectAllStatement tableNames whereClause
+    orderClause <- optional parseOrderClause
+    pure $ SelectAllStatement tableNames whereClause orderClause
 
 parseSystemFunctionStatement :: Parser ParsedStatement
 parseSystemFunctionStatement = do
@@ -283,8 +293,10 @@ parseSelectStatement = do
     _ <- parseKeyword "from"
     _ <- parseWhitespace
     tableNames <- parseWord `sepBy` (parseChar ',' *> optional parseWhitespace)
+    _ <- optional parseWhitespace
     whereClause <- optional parseWhereClause
-    pure $ SelectStatement tableNames selectData whereClause
+    orderClause <- optional parseOrderClause
+    pure $ SelectStatement tableNames selectData whereClause orderClause
 
 parseInsertStatement :: Parser ParsedStatement
 parseInsertStatement = do
@@ -327,6 +339,27 @@ parseDeleteStatement = do
     _ <- optional parseWhitespace
     whereConditions <- optional parseWhereClause'
     pure $ DeleteStatement tableName whereConditions
+
+-- order parsing functions
+parseOrderClause :: Parser OrderClause
+parseOrderClause = do
+    _ <- parseKeyword "order by"
+    _ <- parseWhitespace
+    parseOrderElement `sepBy` (parseChar ',' *> optional parseWhitespace)
+
+parseOrderElement :: Parser (SortDirection, Maybe TableName, ColumnName)
+parseOrderElement = do
+    tableName <- optional (parseWord <* parseChar '.')
+    columnName <- parseWord
+    sortDir <- parseOrderDirection
+    return (sortDir, tableName, columnName)
+
+parseOrderDirection :: Parser SortDirection
+parseOrderDirection = do
+    direction <- optional $ parseWhitespace *> (parseKeyword "asc" <|> parseKeyword "desc")
+    return $ case map toLower <$> direction of
+                Just "desc" -> Desc
+                _           -> Asc
 
 -- util parsing functions
 sepBy :: Parser a -> Parser b -> Parser [a]
@@ -500,7 +533,6 @@ parseValueAndQuoteFlag = do
 -- where clause parsing
 parseWhereClause :: Parser WhereClause
 parseWhereClause = do
-    _ <- parseWhitespace
     _ <- parseKeyword "where"
     _ <- parseWhitespace
     some parseCriterionAndOptionalOperator
