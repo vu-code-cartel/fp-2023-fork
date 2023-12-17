@@ -83,6 +83,13 @@ runExecuteIO dbMock getCurrentTime' (Free step) = do
     runStep db getCurrentTime' (Lib3.GetTableNames next) = 
         return (db, next $ map fst db)
 
+    runStep db getCurrentTime' (Lib3.RemoveTable tableName next) =
+        case lookup tableName db of
+            Just ref -> do
+                let newDb = filter (\(name, _) -> name /= tableName) db
+                return (newDb, next Nothing)
+            Nothing -> return (db, next $ Just $ "Table not found.")
+
 getValueByKey :: Eq a => [(a, b)] -> a -> b
 getValueByKey [] _ = error "Key not found"
 getValueByKey ((k, v):xs) key
@@ -327,6 +334,7 @@ main = hspec $ do
         [IntegerValue 2, StringValue "Just"],
         [IntegerValue 3, StringValue "Eric", StringValue "Doe"]])
         `shouldSatisfy` isLeft
+  describe "Lib3.parseStatement" $ do
     it "parser handles SELECT columns with specified tables" $ do
       Lib3.parseStatement "SELECT table1.id, table2.id FROM table1, table2;"
       `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "id" (Just "table2")], Lib3.whereClause = Nothing})
@@ -351,6 +359,7 @@ main = hspec $ do
     it "parser handles specified and unspecified tables in WHERE clause" $ do
       Lib3.parseStatement "SELECT table1.id, table2.age FROM table1, table2 WHERE identification=table2.name AND name != 'Jane';"
       `shouldBe` Right (Lib3.SelectStatement {Lib3.tables = ["table1","table2"], Lib3.query = [Lib3.SelectColumn "id" (Just "table1"),Lib3.SelectColumn "age" (Just "table2")], Lib3.whereClause = Just [(Lib3.WhereCriterion (Lib3.ColumnExpression "identification" Nothing) RelEQ (Lib3.ColumnExpression "name" (Just "table2")),Just Parser.And),(Lib3.WhereCriterion (Lib3.ColumnExpression "name" Nothing) RelNE (Lib3.ValueExpression (StringValue "Jane")),Nothing)]})
+  describe "advanced select" $ do
     it "basic select to check io " $ do
       db <- setupDB
       res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "SELECT id FROM employees;"
@@ -383,6 +392,7 @@ main = hspec $ do
       db <- setupDB
       res <- runExecuteIO db mockGetCurrentTime $ Lib3.executeSql "SELECT SUM(id), MIN(name), NOW() FROM employees;"
       res `shouldBe` Right (DataFrame [Column "Sum(employees.id)" IntegerType,Column "Min(employees.name)" StringType,Column "NOW()" DateTimeType] [[IntegerValue 3,StringValue "Ed",DateTimeValue "1410-07-15 11:00:00"]])
+  describe "Insert/update/delete" $ do
     it "parses a simple insert statement (uppercase)" $ do
       let input = "INSERT INTO myTable VALUES (1, 'John', true);"
       Lib3.parseStatement input `shouldBe` Right (Lib3.InsertStatement "myTable" Nothing [IntegerValue 1, StringValue "John", BoolValue True])
@@ -476,6 +486,7 @@ main = hspec $ do
       db <- setupDB
       res <- runExecuteIO db getCurrentTime $ Lib3.executeSql "DELETE FROM employees where name='Vi'"
       res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType, Column "surname" StringType] [[IntegerValue 2, StringValue "Ed", StringValue "Dl"]])
+  describe "drop, create and order by" $ do
     it "parses drop table statement (lowercase)" $ do
       let input = "drop table tablename;"
       Parser.parseStatement input `shouldBe` Right (Parser.DropTableStatement { Parser.table = "tablename" })
@@ -524,3 +535,11 @@ main = hspec $ do
       db <- setupDB
       res <- runExecuteIO db getCurrentTime $ Lib3.executeSqlWithParser "SELECT * FROM people, employees WHERE people.name=employees.name ORDER BY people.name ASC, people.surname;" 
       res `shouldBe` Right (DataFrame [Column "people.id" IntegerType,Column "people.name" StringType,Column "people.surname" StringType,Column "employees.id" IntegerType,Column "employees.name" StringType,Column "employees.surname" StringType] [[IntegerValue 5,StringValue "Ed",StringValue "Dl",IntegerValue 2,StringValue "Ed",StringValue "Dl"],[IntegerValue 1,StringValue "Vi",StringValue "Po",IntegerValue 1,StringValue "Vi",StringValue "Po"]])
+    it "creates a table" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSqlWithParser "CREATE TABLE someTable (id int, name varchar)"
+      res `shouldBe` Right (DataFrame [Column "id" IntegerType, Column "name" StringType] [])
+    it "drops a table" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSqlWithParser "DROP TABLE employees"
+      res `shouldSatisfy` isRight 
