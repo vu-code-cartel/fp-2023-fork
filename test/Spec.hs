@@ -500,3 +500,27 @@ main = hspec $ do
     it "handles incorrect create table statement with invalid datatype" $ do
       let input = "create table exampleTable (id int , name varchar , flag bol, holidays_from date );"
       Parser.parseStatement input `shouldSatisfy` isLeft
+    it "parser handles unspecified sorting direction in ORDER BY clause" $ do
+      Parser.parseStatement "SELECT c1, c2 FROM table ORDER BY c1, c2;"
+      `shouldBe` Right (Parser.SelectStatement {Parser.tables = ["table"], Parser.query = [Parser.SelectColumn "c1" Nothing,Parser.SelectColumn "c2" Nothing], Parser.whereClause = Nothing, Parser.orderClause = Just [(Parser.Asc,Nothing,"c1"),(Parser.Asc,Nothing,"c2")]})
+    it "parser handles different sorting directions in ORDER BY clause" $ do
+      Parser.parseStatement "SELECT c1, c2 FROM table WHERE c1 < c2 ORDER BY c1 DESC, c2 ASC;"
+      `shouldBe` Right (Parser.SelectStatement {Parser.tables = ["table"], Parser.query = [Parser.SelectColumn "c1" Nothing,Parser.SelectColumn "c2" Nothing], Parser.whereClause = Just [(Parser.WhereCriterion (Parser.ColumnExpression "c1" Nothing) Parser.RelLT (Parser.ColumnExpression "c2" Nothing),Nothing)], orderClause = Just [(Parser.Desc,Nothing,"c1"),(Parser.Asc,Nothing,"c2")]})
+    it "parser handles specified tabe names in ORDER BY clause" $ do
+      Parser.parseStatement "SELECT c1, c2 FROM table1, table2 WHERE c1 < c2 ORDER BY table1.c1 DESC, table2.c2 ASC;"
+      `shouldBe` Right (Parser.SelectStatement {Parser.tables = ["table1", "table2"], Parser.query = [Parser.SelectColumn "c1" Nothing,Parser.SelectColumn "c2" Nothing], Parser.whereClause = Just [(Parser.WhereCriterion (Parser.ColumnExpression "c1" Nothing) Parser.RelLT (Parser.ColumnExpression "c2" Nothing),Nothing)], orderClause = Just [(Parser.Desc,Just "table1","c1"),(Parser.Asc,Just "table2","c2")]})
+    it "parser handles ORDER BY clause in SELECT *" $ do
+      Parser.parseStatement "SELECT * FROM table WHERE c1 < c2 ORDER BY c1 DESC, c2 ASC;"
+      `shouldBe` Right (Parser.SelectAllStatement {Parser.tables = ["table"], Parser.whereClause = Just [(Parser.WhereCriterion (Parser.ColumnExpression "c1" Nothing) Parser.RelLT (Parser.ColumnExpression "c2" Nothing),Nothing)], orderClause = Just [(Parser.Desc,Nothing,"c1"),(Parser.Asc,Nothing,"c2")]})
+    it "unspecified ORDER BY direction and tablename" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSqlWithParser "SELECT * FROM people ORDER BY name;"
+      res `shouldBe` Right (DataFrame [Column "people.id" IntegerType,Column "people.name" StringType,Column "people.surname" StringType] [[IntegerValue 5,StringValue "Ed",StringValue "Dl"],[IntegerValue 2,StringValue "Ja",StringValue "Ne"],[IntegerValue 3,StringValue "Jo",StringValue "Nas"],[IntegerValue 4,StringValue "Jo",StringValue "Po"],[IntegerValue 1,StringValue "Vi",StringValue "Po"]])
+    it "unspecified multiple ORDER BY with different directions" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSqlWithParser "SELECT * FROM people ORDER BY name ASC, surname DESC;"
+      res `shouldBe` Right (DataFrame [Column "people.id" IntegerType,Column "people.name" StringType,Column "people.surname" StringType] [[IntegerValue 5,StringValue "Ed",StringValue "Dl"],[IntegerValue 2,StringValue "Ja",StringValue "Ne"],[IntegerValue 4,StringValue "Jo",StringValue "Po"],[IntegerValue 3,StringValue "Jo",StringValue "Nas"],[IntegerValue 1,StringValue "Vi",StringValue "Po"]])
+    it "specified multiple ORDER BY with different directions" $ do
+      db <- setupDB
+      res <- runExecuteIO db getCurrentTime $ Lib3.executeSqlWithParser "SELECT * FROM people, employees WHERE people.name=employees.name ORDER BY people.name ASC, people.surname;" 
+      res `shouldBe` Right (DataFrame [Column "people.id" IntegerType,Column "people.name" StringType,Column "people.surname" StringType,Column "employees.id" IntegerType,Column "employees.name" StringType,Column "employees.surname" StringType] [[IntegerValue 5,StringValue "Ed",StringValue "Dl",IntegerValue 2,StringValue "Ed",StringValue "Dl"],[IntegerValue 1,StringValue "Vi",StringValue "Po",IntegerValue 1,StringValue "Vi",StringValue "Po"]])

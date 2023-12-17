@@ -27,8 +27,9 @@ import Control.Monad.Trans.Class (lift)
 import DataFrame (DataFrame (..), ColumnType (IntegerType, StringType, BoolType, DateTimeType), Column (..), Value (..), Row)
 import Data.Time ( UTCTime )
 import Control.Applicative ( many, some, Alternative((<|>)), optional )
-import Data.List (find, findIndex, elemIndex)
+import Data.List (find, findIndex, elemIndex, sortBy)
 import Data.Maybe (mapMaybe, catMaybes, listToMaybe, isJust, fromMaybe)
+import Data.Ord (comparing, Down(..))
 import Data.Time.Format (formatTime, defaultTimeLocale, parseTimeM)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -59,6 +60,8 @@ import Parser (
     SelectData(..),
     SelectQuery(..),
     Condition(..),
+    OrderClause(..),
+    SortDirection(..),
     parseStatement
     )
 
@@ -141,19 +144,10 @@ removeTable tableName = liftF $ RemoveTable tableName id
 executeSqlWithParser :: String -> Execution (Either ErrorMessage DataFrame)
 executeSqlWithParser sql = case Parser.parseStatement sql of
     Left errorMsg -> return $ Left errorMsg
-    Right (Parser.SelectStatement tableNames query maybeWhereClause) -> 
-        executeSelectStatement tableNames query maybeWhereClause
-    Right (Parser.SelectAllStatement tableNames maybeWhereClause) -> do
-        loadResult <- loadTables tableNames
-        case loadResult of
-            Left errorMsg -> return $ Left errorMsg
-            Right tableData -> do 
-                case updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause of
-                    Left errMsg -> return $ Left errMsg
-                    Right updatedMaybeWhereClause -> do
-                        let productDataFrame = cartesianProduct tableData
-                        let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
-                        return $ Right filteredDataFrame
+    Right (Parser.SelectStatement tableNames query maybeWhereClause maybeOrderClause) -> 
+        executeSelectStatementWithOrderClause tableNames query maybeWhereClause maybeOrderClause
+    Right (Parser.SelectAllStatement tableNames maybeWhereClause maybeOrderClause) -> do
+        executeSelectAllWithOptionalOrder tableNames maybeWhereClause maybeOrderClause
     Right (Parser.ShowTableStatement table) -> do
         loadResult <- loadTable table
         case loadResult of 
@@ -201,6 +195,7 @@ executeSqlWithParser sql = case Parser.parseStatement sql of
                 saveTable (tableName, DataFrame columns [])
                 return $ Right (DataFrame columns [])
             Right _ -> return $ Left "Table already exists."
+
 executeSql :: String -> Execution (Either ErrorMessage DataFrame)
 executeSql sql = case Lib3.parseStatement sql of
     Left errorMsg -> return $ Left errorMsg
@@ -255,7 +250,42 @@ executeSql sql = case Lib3.parseStatement sql of
                     then deleteWithWhere tableData whereConditions
                     else deleteWithoutWhere tableData
 
-executeSelectStatement :: [TableName] -> SelectQuery -> Maybe WhereClause -> Execution (Either ErrorMessage DataFrame)
+executeSelectStatementWithOrderClause :: [TableName] -> SelectQuery -> Maybe WhereClause -> Maybe OrderClause -> Execution (Either ErrorMessage DataFrame)
+executeSelectStatementWithOrderClause tableNames query maybeWhereClause maybeOrderClause = do
+    loadResult <- loadTables tableNames
+    case loadResult of
+        Left errorMsg -> return $ Left errorMsg
+        Right tableData -> runExceptT $ do
+            updatedQuery <- ExceptT . return $ updateUnspecifiedTableNames tableData tableNames query
+            _ <- ExceptT . return $ validateSelectDataTablesAndColumns tableData updatedQuery
+            updatedMaybeWhereClause <- ExceptT . return $ updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause
+            _ <- ExceptT . return $ validateWhereClauseTablesAndColumns tableData updatedMaybeWhereClause
+            updatedMaybeOrderClause <- ExceptT . return $ updateUnspecifiedTableNamesInOrderClause tableData maybeOrderClause
+
+            let productDataFrame = cartesianProduct tableData
+            let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
+            resultDataFrame <- if any isAggregate updatedQuery 
+                               then ExceptT $ calculateAggregatesFromDataFrame filteredDataFrame updatedQuery
+                               else lift $ selectColumnsFromDataFrame filteredDataFrame updatedQuery
+
+            case updatedMaybeOrderClause of
+                Just orderClause -> ExceptT . return $ sortDataFrame resultDataFrame orderClause
+                Nothing -> return resultDataFrame
+
+executeSelectAllWithOptionalOrder :: [TableName] -> Maybe WhereClause -> Maybe OrderClause -> Execution (Either ErrorMessage DataFrame)
+executeSelectAllWithOptionalOrder tableNames maybeWhereClause maybeOrderClause = runExceptT $ do
+    tableData <- ExceptT $ loadTables tableNames
+    updatedMaybeWhereClause <- ExceptT . return $ updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause
+    updatedMaybeOrderClause <- ExceptT . return $ updateUnspecifiedTableNamesInOrderClause tableData maybeOrderClause
+
+    let productDataFrame = cartesianProduct tableData
+    let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
+
+    case updatedMaybeOrderClause of
+        Just orderClause -> ExceptT . return $ sortDataFrame filteredDataFrame orderClause
+        Nothing -> return filteredDataFrame
+
+executeSelectStatement :: [TableName] -> SelectQuery -> Maybe WhereClause ->Execution (Either ErrorMessage DataFrame)
 executeSelectStatement tableNames query maybeWhereClause = do
     loadResult <- loadTables tableNames
     case loadResult of
@@ -266,6 +296,7 @@ executeSelectStatement tableNames query maybeWhereClause = do
             updatedMaybeWhereClause <- ExceptT . return $ updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause
             _ <- ExceptT . return $ validateWhereClauseTablesAndColumns tableData updatedMaybeWhereClause
 
+
             let productDataFrame = cartesianProduct tableData
             let filteredDataFrame = filterDataFrameByWhereClause productDataFrame updatedMaybeWhereClause
 
@@ -273,6 +304,35 @@ executeSelectStatement tableNames query maybeWhereClause = do
                 ExceptT $ calculateAggregatesFromDataFrame filteredDataFrame updatedQuery
             else
                 lift $ selectColumnsFromDataFrame filteredDataFrame updatedQuery
+
+-- order by functions
+
+sortDataFrame :: DataFrame -> OrderClause -> Either ErrorMessage DataFrame
+sortDataFrame (DataFrame columns rows) orderClause = do
+    sortCriteria <- mapM (createSortCriterion columns) orderClause
+    let sortedRows = sortBy (makeMultiColumnComparator sortCriteria) rows
+    return $ DataFrame columns sortedRows
+
+createSortCriterion :: [Column] -> (SortDirection, Maybe TableName, ColumnName) -> Either ErrorMessage (Int, SortDirection)
+createSortCriterion columns (direction, maybeTableName, columnName) =
+    case findIndex (matchesColumn maybeTableName columnName) columns of
+        Just idx -> Right (idx, direction)
+        Nothing -> Left $ "Column not found: " ++ fromMaybe "" maybeTableName ++ "." ++ columnName
+
+matchesColumn :: Maybe TableName -> ColumnName -> Column -> Bool
+matchesColumn maybeTableName columnName (Column colName _) =
+    colName == fullColumnName
+    where fullColumnName = fromMaybe "" maybeTableName ++ "." ++ columnName
+
+makeMultiColumnComparator :: [(Int, SortDirection)] -> Row -> Row -> Ordering
+makeMultiColumnComparator [] _ _ = EQ
+makeMultiColumnComparator ((idx, dir):criteria) row1 row2 =
+    let primaryOrder = compareValue dir (row1 !! idx) (row2 !! idx)
+    in if primaryOrder == EQ then makeMultiColumnComparator criteria row1 row2 else primaryOrder
+
+compareValue :: SortDirection -> Value -> Value -> Ordering
+compareValue Asc v1 v2 = compare v1 v2
+compareValue Desc v1 v2 = compare v2 v1
 
 -- delete functions
 
@@ -1008,12 +1068,22 @@ updateUnspecifiedTableNamesInWhereClause tableData maybeWhereClause =
             Nothing -> Left $ "Column " ++ columnName ++ " not found in any table"
     updateExpression expr = Right expr
 
-    findColumnTable :: ColumnName -> [(TableName, DataFrame)] -> Maybe TableName
-    findColumnTable columnName = fmap fst . find (\(_, df) -> columnExistsInDataFrame columnName df)
-
 columnExistsInDataFrame :: ColumnName -> DataFrame -> Bool
 columnExistsInDataFrame columnName (DataFrame columns _) =
   any (\(Column colName _) -> colName == columnName) columns
+
+updateUnspecifiedTableNamesInOrderClause :: [(TableName, DataFrame)] -> Maybe OrderClause -> Either ErrorMessage (Maybe OrderClause)
+updateUnspecifiedTableNamesInOrderClause tableData maybeOrderClause = case maybeOrderClause of
+    Just orderClause -> fmap Just (traverse updateOrderElement orderClause)
+    Nothing -> Right Nothing
+  where
+    updateOrderElement :: (SortDirection, Maybe TableName, ColumnName) -> Either ErrorMessage (SortDirection, Maybe TableName, ColumnName)
+    updateOrderElement (sortDir, Nothing, columnName) =
+        maybe (Left $ "Column " ++ columnName ++ " not found in any table") (\tableName -> Right (sortDir, Just tableName, columnName)) (findColumnTable columnName tableData)
+    updateOrderElement oe = Right oe
+
+findColumnTable :: ColumnName -> [(TableName, DataFrame)] -> Maybe TableName
+findColumnTable columnName = fmap fst . find (\(_, df) -> columnExistsInDataFrame columnName df)
 
 ---- produce new dataframe based on tables and where clause
 
